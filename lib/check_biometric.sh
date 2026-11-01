@@ -39,7 +39,12 @@ _taw_bio_attempt() {
     else
         taw_debug "'timeout' nicht verfügbar – Dialog läuft ohne Zeitlimit"
     fi
-    cmd+=("$fp" -t "${TAW_BIO_TITLE:-Termux-Authentifizierung}" -d "$desc")
+    cmd+=("$fp")
+    # Titel/Beschreibung abschaltbar, falls eine termux-api-Version die
+    # Optionen nicht kennt
+    if taw_is_true "${TAW_BIO_DIALOG_TEXT:-true}"; then
+        cmd+=(-t "${TAW_BIO_TITLE:-Termux-Authentifizierung}" -d "$desc")
+    fi
 
     taw_ensure_dir "$TAW_RUNTIME_DIR" 700
     errfile=$(mktemp "$TAW_RUNTIME_DIR/fp-err.XXXXXX")
@@ -52,7 +57,7 @@ _taw_bio_attempt() {
     taw_debug "termux-fingerprint rc=$rc out=${out//$'\n'/ } err=${errtext//$'\n'/ }"
 
     if (( rc == 124 )); then
-        _taw_bio_set unavailable "Keine Antwort von Termux:API innerhalb von ${TAW_BIO_TIMEOUT}s. Entweder wurde der Dialog nicht bestätigt, oder die App 'Termux:API' fehlt bzw. darf nicht im Vordergrund starten."
+        _taw_bio_set unavailable "Keine Antwort von Termux:API innerhalb von ${TAW_BIO_TIMEOUT}s. Entweder wurde der Dialog nicht bestätigt, oder die App 'Termux:API' reagiert nicht (Quelle/Signatur, Akku-Einschränkung, nie geöffnet). Ursache eingrenzen mit: termux-auth diag"
         return 1
     fi
     if (( rc == 126 || rc == 127 )); then

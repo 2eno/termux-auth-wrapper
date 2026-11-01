@@ -23,6 +23,7 @@ Aufruf: termux-auth <Befehl> [Optionen]
 Befehle:
   status            Installationszustand, Abhängigkeiten und Konfiguration anzeigen
   doctor            wie status, zusätzlich Live-Prüfungen (su, Bitwarden)
+  diag              Schritt-für-Schritt-Diagnose der Termux:API-Verbindung
   test              Fingerabdruck-Dialog testen (ohne Cache)
   reset [--bw]      Auth-Cache löschen (--bw: zusätzlich Bitwarden-Session sperren)
   set-pin           Fallback-PIN festlegen (für FALLBACK_MODE=pin)
@@ -131,6 +132,90 @@ cmd_status() {
     fi
 }
 
+# Führt einen Befehl mit Zeitlimit aus; setzt DIAG_OUT und DIAG_RC
+_diag_run() {
+    local t=$1; shift
+    DIAG_RC=0
+    DIAG_OUT=$(timeout "$t" "$@" </dev/null 2>&1) || DIAG_RC=$?
+}
+
+cmd_diag() {
+    taw_load_config
+    local v su="" c pkg_ok=true ipc_ok=false
+    printf 'Termux:API-Diagnose\n\n'
+
+    printf '1) Termux-App\n'
+    printf '   TERMUX_VERSION=%s  TERMUX_APK_RELEASE=%s\n' "${TERMUX_VERSION:-?}" "${TERMUX_APK_RELEASE:-?}"
+    if [[ ${TERMUX_APK_RELEASE:-} == GOOGLE_PLAY_STORE ]]; then
+        _mark warn; printf 'Termux aus dem Play Store: Termux:API muss ebenfalls aus dem Play Store kommen.\n'
+    elif [[ -z ${TERMUX_VERSION:-} ]]; then
+        _mark warn; printf 'TERMUX_VERSION fehlt: sehr alte Termux-App (z. B. alter Play-Store-Stand)? Aktuelle Version von F-Droid/GitHub empfohlen.\n'
+    fi
+
+    printf '\n2) Paket termux-api\n'
+    if v=$(dpkg-query -W -f='${Version}' termux-api 2>/dev/null); then
+        _mark ok; printf 'termux-api %s\n' "$v"
+    else
+        _mark fail; printf 'Paket termux-api nicht installiert -> pkg install termux-api\n'; pkg_ok=false
+    fi
+
+    printf '\n3) App com.termux.api (über root, nur lesend)\n'
+    for c in "${TAW_SU_BINARY/#auto/}" /system/bin/su /data/adb/ksu/bin/su /system/xbin/su; do
+        [[ -n $c && -x $c ]] && { su=$c; break; }
+    done
+    if [[ -n $su ]]; then
+        # shellcheck disable=SC2016  # wird auf der Root-Seite expandiert
+        _diag_run 20 "$su" -c 'for p in com.termux com.termux.api; do echo "== $p"; dumpsys package $p | grep -E "versionName=|installerPackageName=|stopped=|enabled=" | sed -n 1,6p; done; echo "== appops com.termux.api"; cmd appops get com.termux.api 2>/dev/null | grep -E "SYSTEM_ALERT_WINDOW|RUN_ANY_IN_BACKGROUND|RUN_IN_BACKGROUND"; echo "== standby"; am get-standby-bucket com.termux.api 2>/dev/null'
+        if [[ $DIAG_RC == 0 && -n $DIAG_OUT ]]; then
+            printf '%s\n' "$DIAG_OUT" | sed 's/^/   /'
+            if ! grep -q 'versionName=' <<<"$(sed -n '/== com.termux.api/,/== appops/p' <<<"$DIAG_OUT")"; then
+                _mark fail; printf 'App Termux:API ist NICHT installiert (das Paket termux-api allein reicht nicht).\n'
+            fi
+            grep -q 'stopped=true' <<<"$DIAG_OUT" && { _mark warn; printf 'Eine App steht auf stopped=true -> Termux:API einmal öffnen bzw. nicht "Beenden erzwingen".\n'; }
+            grep -qE 'RUN_ANY_IN_BACKGROUND: (ignore|deny)' <<<"$DIAG_OUT" && { _mark warn; printf 'Hintergrund-Ausführung für Termux:API eingeschränkt -> Akku: "Nicht eingeschränkt".\n'; }
+            printf '   Hinweis: installerPackageName von com.termux und com.termux.api sollte übereinstimmen (beide F-Droid ODER beide GitHub/Play).\n'
+        else
+            _mark warn; printf 'Konnte Paketinfos nicht lesen (rc=%s)\n' "$DIAG_RC"
+        fi
+    else
+        _mark warn; printf 'kein su – übersprungen\n'
+    fi
+
+    printf '\n4) IPC-Test ohne Dialog (termux-battery-status, 10s)\n'
+    if [[ $pkg_ok == true ]]; then
+        _diag_run 10 termux-battery-status
+        if [[ $DIAG_RC == 0 && $DIAG_OUT == *"{"* ]]; then
+            _mark ok; printf 'Termux:API antwortet -> die Verbindung funktioniert grundsätzlich.\n'; ipc_ok=true
+        elif [[ $DIAG_RC == 124 ]]; then
+            _mark fail; printf 'Keine Antwort -> Termux:API empfängt gar keine Anfragen.\n'
+            printf '         Ursache fast immer: App aus anderer Quelle als Termux (Signatur), App nie geöffnet/zwangsbeendet oder Akku-Einschränkung.\n'
+        else
+            _mark fail; printf 'rc=%s: %s\n' "$DIAG_RC" "${DIAG_OUT:0:200}"
+        fi
+    fi
+
+    printf '\n5) termux-fingerprint ohne Optionen (%ss) – bitte jetzt den Sensor berühren\n' "$TAW_BIO_TIMEOUT"
+    if [[ $pkg_ok == true ]]; then
+        _diag_run "$TAW_BIO_TIMEOUT" termux-fingerprint
+        printf '   rc=%s Ausgabe: %s\n' "$DIAG_RC" "${DIAG_OUT:-<leer>}"
+        if [[ $DIAG_OUT == *AUTH_RESULT_SUCCESS* ]]; then
+            _mark ok; printf 'Fingerabdruck ohne Optionen funktioniert.\n'
+            printf '\n6) termux-fingerprint mit -t/-d\n'
+            _diag_run "$TAW_BIO_TIMEOUT" termux-fingerprint -t "Diagnose" -d "Test mit Titel"
+            printf '   rc=%s Ausgabe: %s\n' "$DIAG_RC" "${DIAG_OUT:-<leer>}"
+            if [[ $DIAG_OUT == *AUTH_RESULT_SUCCESS* ]]; then
+                _mark ok; printf 'Alles funktioniert.\n'
+            else
+                _mark warn; printf 'Mit -t/-d klappt es nicht -> in der Konfiguration BIO_DIALOG_TEXT=false setzen.\n'
+            fi
+        elif [[ $DIAG_RC == 124 && $ipc_ok == true ]]; then
+            _mark fail; printf 'Nur der Dialog hängt: Android blockiert vermutlich das Öffnen der Activity.\n'
+            printf '         -> Termux:API die Berechtigung "Über anderen Apps einblenden" geben, Termux im Vordergrund lassen,\n'
+            printf '            ggf. BIO_TIMEOUT erhöhen. Erscheint der Dialog gar nicht, Termux:API aktualisieren.\n'
+        fi
+    fi
+}
+
 cmd_set_pin() {
     taw_load_config
     taw_have_tty || taw_die "set-pin benötigt ein Terminal."
@@ -203,6 +288,7 @@ main() {
     case $subcmd in
         status)  cmd_status false ;;
         doctor)  cmd_status true ;;
+        diag)    cmd_diag ;;
         test)
             taw_load_config
             if taw_biometric_check "Test von termux-auth-wrapper"; then

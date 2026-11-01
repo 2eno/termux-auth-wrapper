@@ -17,6 +17,9 @@ BIO_TITLE="Termux-Authentifizierung"
 BIO_TIMEOUT=30
 # Wie oft der Dialog bei "nicht erkannt/abgebrochen" erneut erscheint
 BIO_MAX_ATTEMPTS=2
+# Titel/Beschreibung (-t/-d) an termux-fingerprint übergeben.
+# Auf false setzen, falls die installierte termux-api-Version das nicht kann.
+BIO_DIALOG_TEXT=true
 
 # --- Auth-Cache (Gnadenfrist, wie sudo "timestamp_timeout") -----------------
 # Sekunden, die eine erfolgreiche Authentifizierung gültig bleibt.

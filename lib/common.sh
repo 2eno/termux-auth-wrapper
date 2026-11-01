@@ -106,6 +106,7 @@ declare -gA _TAW_DEFAULTS=(
     [BIO_TITLE]="Termux-Authentifizierung"
     [BIO_TIMEOUT]="30"
     [BIO_MAX_ATTEMPTS]="2"
+    [BIO_DIALOG_TEXT]="true"
     # Auth-Cache (Gnadenfrist wie bei sudo)
     [AUTH_CACHE_TIMEOUT]="300"
     [AUTH_CACHE_SCOPE]="session"

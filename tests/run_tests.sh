@@ -246,6 +246,24 @@ assert_eq "Kein Sensor -> keine Wiederholung" 1 "$(fp_count)"
 MOCK_FP=success run check_biometric -t "Mein Titel" -d "Meine Beschreibung"
 assert_contains "Titel/Beschreibung an termux-fingerprint" "-t Mein Titel -d Meine Beschreibung" "$(cat "$FP_CALLS")"
 
+: >"$FP_CALLS"
+MOCK_FP=success TAW_BIO_DIALOG_TEXT=false run check_biometric -d "X"
+assert_eq "BIO_DIALOG_TEXT=false -> keine Optionen" "call " "$(cat "$FP_CALLS")"
+
+# =============================================================================
+section "termux-auth diag"
+printf '#!/bin/sh\necho "1.2.3"\n' >"$PREFIX/bin/dpkg-query"
+printf '#!/bin/sh\n[ -n "$MOCK_IPC_HANG" ] && sleep 30\necho "{\\"percentage\\": 80}"\n' >"$PREFIX/bin/termux-battery-status"
+chmod +x "$PREFIX/bin/dpkg-query" "$PREFIX/bin/termux-battery-status"
+MOCK_FP=hang run termux-auth diag
+assert_contains "diag: Paketversion" "termux-api 1.2.3" "$OUT"
+assert_contains "diag: IPC ok, nur Dialog hängt" "Nur der Dialog hängt" "$OUT"
+MOCK_FP=hang MOCK_IPC_HANG=1 run termux-auth diag
+assert_contains "diag: IPC hängt -> Hinweis Signatur/Quelle" "empfängt gar keine Anfragen" "$OUT"
+MOCK_FP=success run termux-auth diag
+assert_contains "diag: Erfolg" "Alles funktioniert" "$OUT"
+rm -f "$PREFIX/bin/dpkg-query" "$PREFIX/bin/termux-battery-status"
+
 # =============================================================================
 section "sudo-Wrapper"
 MOCK_FP=success run sudo id -u

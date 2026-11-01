@@ -393,6 +393,7 @@ Manuell prüfen: `termux-auth status`, reparieren: `termux-auth repair`.
 ```
 termux-auth status          Installationszustand, PATH-Auflösung, Abhängigkeiten, Konfiguration
 termux-auth doctor          wie status, plus Live-Test von su -c und Bitwarden
+termux-auth diag            Schritt-für-Schritt-Diagnose der Termux:API-Verbindung
 termux-auth test            Fingerabdruckdialog testen
 termux-auth reset [--bw]    Auth-Cache löschen (--bw: Bitwarden-Session verwerfen + bw lock)
 termux-auth set-pin         Fallback-PIN festlegen
@@ -408,7 +409,7 @@ termux-auth log [N]         letzte N Audit-Log-Einträge
 | Meldung | Ursache und Lösung |
 |---|---|
 | `termux-fingerprint nicht gefunden` | `pkg install termux-api` |
-| `Keine Antwort von Termux:API innerhalb von 30s` | Die **App** Termux:API fehlt oder stammt aus einer anderen Quelle als Termux (F-Droid und GitHub nicht mischen). Bei Aufrufen aus dem Hintergrund kann Android den Dialog blockieren, dann Termux/Termux:API die Berechtigung *Über anderen Apps einblenden* geben. |
+| `Keine Antwort von Termux:API innerhalb von 30s` | **Zuerst `termux-auth diag` ausführen**, siehe unten. |
 | `lieferte keine Ausgabe` / `kein JSON` | Termux:API-App installieren oder aktualisieren, die Versionen von App und Paket `termux-api` sollten zusammenpassen |
 | `keinen Fingerabdrucksensor` | Gerät ohne Sensor, ggf. `FALLBACK_MODE=pin` |
 | `Kein Fingerabdruck eingerichtet` | Android-Einstellungen → Sicherheit → Fingerabdruck |
@@ -420,6 +421,27 @@ termux-auth log [N]         letzte N Audit-Log-Einträge
 | `sshpass nicht installiert` | `pkg install sshpass` |
 | `sudo`/`ssh` fragt nicht nach dem Fingerabdruck | `termux-auth status` zeigt die PATH-Auflösung; mit `hash -r` den Befehls-Cache der Shell leeren |
 | allgemein | `TAW_DEBUG=true sudo id` zeigt jeden Schritt |
+
+### Termux:API antwortet nicht (Timeout)
+
+`termux-auth diag` prüft nacheinander:
+
+1. Termux-Version und Quelle (`TERMUX_APK_RELEASE`)
+2. Version des Pakets `termux-api`
+3. per root (nur lesend) `dumpsys package` für `com.termux` und `com.termux.api`: installiert?
+   `stopped`? Installationsquelle? Hintergrund-Einschränkungen?
+4. `termux-battery-status`, also eine API **ohne** Dialog. Hängt sie auch, kommt gar keine
+   Anfrage bei der App an.
+5. `termux-fingerprint` ohne Optionen, danach mit `-t/-d`
+
+Typische Ursachen:
+- Termux und Termux:API stammen aus **unterschiedlichen Quellen** (F-Droid, GitHub, Play Store),
+  dann passen die Signaturen nicht.
+- Termux:API wurde nie geöffnet oder per „Beenden erzwingen“ gestoppt (`stopped=true`): die App
+  einmal öffnen.
+- Akku-Einschränkung: Termux:API unter Akku auf **„Nicht eingeschränkt“** stellen.
+- Nur der Dialog hängt: Termux:API *Über anderen Apps einblenden* erlauben.
+- Mit `-t/-d` hängt es, ohne nicht: `BIO_DIALOG_TEXT=false` setzen.
 
 ---
 
