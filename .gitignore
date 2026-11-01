@@ -3,3 +3,4 @@ config/config.conf
 config/ssh-hosts.conf
 *.taw-new.*
 *.taw-backup
+*.whl
