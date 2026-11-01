@@ -1,0 +1,15 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Abhängigkeiten
+        run: sudo apt-get update && sudo apt-get install -y jq shellcheck
+      - name: Testsuite
+        run: tests/run_tests.sh -v

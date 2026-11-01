@@ -1,0 +1,240 @@
+#!/usr/bin/env bash
+# TERMUX_AUTH_WRAPPER_MARKER
+# shellcheck disable=SC2153  # TAW_*-Werte stammen aus taw_load_config
+# =============================================================================
+# termux-auth – Verwaltungswerkzeug für termux-auth-wrapper
+# =============================================================================
+set -euo pipefail
+
+TAW_COMPONENT="termux-auth"
+_taw_lib="@TAW_LIB_DIR@"
+[[ -d $_taw_lib ]] || _taw_lib="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib"
+# shellcheck source=lib/auth.sh
+source "$_taw_lib/auth.sh" || { echo "[termux-auth] Fehler: Bibliothek nicht gefunden ($_taw_lib)" >&2; exit 1; }
+# shellcheck source=lib/bitwarden.sh
+source "$_taw_lib/bitwarden.sh"
+# shellcheck source=lib/install-lib.sh
+source "$_taw_lib/install-lib.sh"
+
+usage() {
+    cat <<EOF
+Aufruf: termux-auth <Befehl> [Optionen]
+
+Befehle:
+  status            Installationszustand, Abhängigkeiten und Konfiguration anzeigen
+  doctor            wie status, zusätzlich Live-Prüfungen (su, Bitwarden)
+  test              Fingerabdruck-Dialog testen (ohne Cache)
+  reset [--bw]      Auth-Cache löschen (--bw: zusätzlich Bitwarden-Session sperren)
+  set-pin           Fallback-PIN festlegen (für FALLBACK_MODE=pin)
+  repair [--quiet]  Wrapper prüfen und bei Bedarf wiederherstellen (z. B. nach pkg upgrade)
+  config [edit]     Pfad der Konfiguration ausgeben bzw. im \$EDITOR öffnen
+  log [N]           letzte N Einträge des Audit-Logs (Standard 20)
+  version           Version anzeigen
+  help              diese Hilfe
+EOF
+}
+
+_mark() { if [[ $1 == ok ]]; then printf '  [ OK ] '; elif [[ $1 == warn ]]; then printf '  [ !! ] '; else printf '  [FAIL] '; fi; }
+
+_check_cmd() {
+    # $1 = Befehl, $2 = Paket/Hinweis, $3 = required|optional
+    local p
+    if p=$(command -v "$1" 2>/dev/null); then
+        _mark ok; printf '%-20s %s\n' "$1" "$p"
+    elif [[ $3 == required ]]; then
+        _mark fail; printf '%-20s fehlt -> %s\n' "$1" "$2"
+    else
+        _mark warn; printf '%-20s fehlt (optional) -> %s\n' "$1" "$2"
+    fi
+}
+
+cmd_status() {
+    local live=${1:-false}
+    taw_load_config
+    printf 'termux-auth-wrapper %s\n\n' "$TAW_VERSION"
+
+    printf 'Installation:\n'
+    if inst_read_state "$TAW_LIB_DIR"; then
+        printf '  Modus: %s   Wrapper-Verzeichnis: %s\n' "$INST_MODE" "$INST_BIN_DIR"
+        local w state resolved real
+        for w in $INST_WRAPPERS; do
+            state=$(inst_wrapper_state "$w")
+            resolved=$(command -v "$w" 2>/dev/null || true)
+            real=$(taw_find_real "$w" 2>/dev/null || true)
+            [[ $w == sudo ]] && real="(su via KernelSU)"
+            if [[ $state == ok && $resolved == "$INST_BIN_DIR/$w" ]]; then
+                _mark ok
+            else
+                _mark warn
+            fi
+            printf '%-6s Zustand=%s, PATH->%s, echtes Binary=%s\n' "$w" "$state" "${resolved:-nicht gefunden}" "${real:-?}"
+            if [[ -n $resolved && $resolved != "$INST_BIN_DIR/$w" ]]; then
+                printf '         -> %s steht im PATH vor %s. PATH-Reihenfolge prüfen!\n' "$resolved" "$INST_BIN_DIR"
+            fi
+            if [[ $state != ok ]]; then
+                printf '         -> "termux-auth repair" ausführen\n'
+            fi
+        done
+        if [[ $INST_APT_HOOK == true ]]; then
+            if [[ -f $(inst_apt_hook) ]]; then _mark ok; else _mark warn; fi
+            printf 'apt-Hook %s\n' "$(inst_apt_hook)"
+        fi
+    else
+        _mark warn; printf 'Kein Installationszustand gefunden (Entwicklungsmodus?)\n'
+    fi
+
+    printf '\nAbhängigkeiten:\n'
+    _check_cmd termux-fingerprint "pkg install termux-api + App 'Termux:API'" required
+    _check_cmd jq "pkg install jq" required
+    _check_cmd timeout "pkg install coreutils" required
+    _check_cmd sha256sum "pkg install coreutils" optional
+    _check_cmd sshpass "pkg install sshpass" optional
+    _check_cmd ssh-add "pkg install openssh" optional
+    _check_cmd bw "npm install -g @bitwarden/cli" optional
+
+    printf '\nRoot (KernelSU):\n'
+    local su=""
+    for c in "${TAW_SU_BINARY/#auto/}" /system/bin/su /data/adb/ksu/bin/su /system/xbin/su /sbin/su; do
+        [[ -n $c && -x $c ]] && { su=$c; break; }
+    done
+    if [[ -n $su ]]; then _mark ok; printf 'su gefunden: %s\n' "$su"
+    else _mark fail; printf 'kein su gefunden – KernelSU aktiv und Termux freigegeben?\n'; fi
+    if [[ $live == true && -n $su ]]; then
+        local uid
+        if uid=$(timeout 15 "$su" -c 'id -u' </dev/null 2>/dev/null) && [[ $uid == 0 ]]; then
+            _mark ok; printf 'su -c funktioniert (uid 0)\n'
+        else
+            _mark fail; printf 'su -c lieferte kein root – in der KernelSU-App Termux Root-Rechte gewähren\n'
+        fi
+    fi
+
+    printf '\nKonfiguration: %s%s\n' "$TAW_CONFIG_FILE" "$([[ -f $TAW_CONFIG_FILE ]] || printf ' (fehlt – Standardwerte)')"
+    printf '  Auth-Cache: %ss (Scope %s)   Fallback: %s   Biometrie-Timeout: %ss\n' \
+        "$TAW_AUTH_CACHE_TIMEOUT" "$TAW_AUTH_CACHE_SCOPE" "$TAW_FALLBACK_MODE" "$TAW_BIO_TIMEOUT"
+    printf '  sudo: %s   ssh: %s (Scope %s)   Bitwarden: %s\n' \
+        "$TAW_SUDO_ENABLED" "$TAW_SSH_ENABLED" "$TAW_SSH_AUTH_SCOPE" "$TAW_BW_ENABLED"
+    if [[ $TAW_FALLBACK_MODE == allow ]]; then
+        _mark warn; printf 'FALLBACK_MODE=allow ist UNSICHER\n'
+    fi
+
+    if [[ $live == true ]] && taw_is_true "$TAW_BW_ENABLED"; then
+        printf '\nBitwarden:\n'
+        if command -v bw >/dev/null 2>&1; then
+            _taw_bw_load_cached_session || true
+            local st
+            st=$(taw_bw_status)
+            if [[ $st == unlocked ]]; then _mark ok; else _mark warn; fi
+            printf 'Status: %s\n' "$st"
+        else
+            _mark fail; printf 'bw nicht installiert\n'
+        fi
+    fi
+}
+
+cmd_set_pin() {
+    taw_load_config
+    taw_have_tty || taw_die "set-pin benötigt ein Terminal."
+    local p1 p2 salt hash
+    printf 'Neue Fallback-PIN (mind. 4 Zeichen): ' >/dev/tty
+    IFS= read -r -s p1 </dev/tty; printf '\n' >/dev/tty
+    printf 'PIN wiederholen: ' >/dev/tty
+    IFS= read -r -s p2 </dev/tty; printf '\n' >/dev/tty
+    [[ $p1 == "$p2" ]] || taw_die "Eingaben stimmen nicht überein."
+    (( ${#p1} >= 4 )) || taw_die "PIN zu kurz."
+    salt=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
+    hash=$(taw_pin_hash "$salt" "$p1")
+    p1="" p2=""
+    _config_set FALLBACK_PIN_HASH "sha256:$salt:$hash"
+    taw_ok "PIN gespeichert in $TAW_CONFIG_FILE"
+    [[ $TAW_FALLBACK_MODE == pin ]] || taw_hint "Zum Aktivieren in der Konfiguration setzen: FALLBACK_MODE=pin"
+}
+
+# Setzt KEY="wert" in der Konfigurationsdatei (ersetzt bzw. ergänzt)
+_config_set() {
+    local key=$1 value=$2 f=$TAW_CONFIG_FILE tmp
+    taw_ensure_dir "$(dirname "$f")" 700
+    [[ -f $f ]] || : >"$f"
+    tmp="$f.tmp.$$"
+    awk -v k="$key" -v v="$value" '
+        BEGIN { done = 0 }
+        $0 ~ "^[[:space:]]*#?[[:space:]]*" k "[[:space:]]*=" && !done { print k "=\"" v "\""; done = 1; next }
+        { print }
+        END { if (!done) print k "=\"" v "\"" }' "$f" >"$tmp"
+    chmod 600 "$tmp"
+    mv -f "$tmp" "$f"
+}
+
+cmd_repair() {
+    local quiet=false w state changed=0
+    [[ ${1:-} == --quiet || ${1:-} == -q ]] && quiet=true
+    [[ $quiet == true ]] && TAW_QUIET=true
+    inst_read_state "$TAW_LIB_DIR" || taw_die "Kein Installationszustand gefunden – bitte install.sh ausführen."
+    for w in $INST_WRAPPERS; do
+        state=$(inst_wrapper_state "$w")
+        if [[ $state == ok ]]; then
+            taw_info "$w: in Ordnung"
+            continue
+        fi
+        # Bei "replaced" immer melden – das deutet auf ein Paket-Update hin
+        [[ $quiet == true ]] && printf '[termux-auth] %s: Zustand "%s" – wird repariert\n' "$w" "$state" >&2
+        inst_place_wrapper "$w"
+        taw_ok "$w: repariert ($state)"
+        changed=$((changed + 1))
+    done
+    if [[ $INST_APT_HOOK == true && ! -f $(inst_apt_hook) ]]; then
+        inst_install_apt_hook
+        changed=$((changed + 1))
+    fi
+    (( changed == 0 )) && taw_info "Nichts zu tun."
+    return 0
+}
+
+cmd_log() {
+    taw_load_config
+    local n=${1:-20} log="$TAW_STATE_DIR/audit.log"
+    taw_is_uint "$n" || taw_die "Ungültige Anzahl: $n"
+    [[ -f $log ]] || { taw_info "Noch kein Audit-Log vorhanden ($log)."; return 0; }
+    tail -n "$n" "$log"
+}
+
+main() {
+    local subcmd=${1:-help}
+    (($#)) && shift
+    case $subcmd in
+        status)  cmd_status false ;;
+        doctor)  cmd_status true ;;
+        test)
+            taw_load_config
+            if taw_biometric_check "Test von termux-auth-wrapper"; then
+                taw_ok "$TAW_BIO_REASON"
+            else
+                printf 'Status: %s\n' "$TAW_BIO_STATUS" >&2
+                exit 1
+            fi ;;
+        reset|lock)
+            taw_load_config
+            taw_cache_clear_all
+            taw_ok "Auth-Cache gelöscht."
+            if [[ ${1:-} == --bw ]]; then
+                taw_bw_forget_session
+                if command -v bw >/dev/null 2>&1; then
+                    bw lock >/dev/null 2>&1 </dev/null || true
+                fi
+                taw_ok "Bitwarden-Session verworfen."
+            fi ;;
+        set-pin) cmd_set_pin ;;
+        repair)  cmd_repair "$@" ;;
+        config)
+            taw_load_config
+            if [[ ${1:-} == edit ]]; then
+                exec "${EDITOR:-nano}" "$TAW_CONFIG_FILE"
+            fi
+            printf '%s\n%s\n' "$TAW_CONFIG_FILE" "$TAW_HOSTS_FILE" ;;
+        log)     cmd_log "$@" ;;
+        version|-V|--version) printf 'termux-auth-wrapper %s\n' "$TAW_VERSION" ;;
+        help|-h|--help) usage ;;
+        *) taw_err "Unbekannter Befehl: $subcmd"; usage >&2; exit 1 ;;
+    esac
+}
+
+main "$@"

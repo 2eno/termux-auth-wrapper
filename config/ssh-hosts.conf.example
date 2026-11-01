@@ -1,0 +1,26 @@
+# =============================================================================
+# termux-auth-wrapper – Zuordnung SSH-Host -> Bitwarden-Eintrag
+# Pfad: ~/.config/termux-auth-wrapper/ssh-hosts.conf
+#
+# Format (eine Zuordnung pro Zeile, erste passende gewinnt):
+#
+#   <host-muster>   <bitwarden-item>   [password|key|auto]
+#
+#   host-muster     Glob-Muster, geprüft gegen den Alias aus der Kommandozeile,
+#                   den aufgelösten Hostnamen (~/.ssh/config) sowie user@host.
+#   bitwarden-item  Item-ID (empfohlen, eindeutig) oder Name in "…" .
+#                   ID ermitteln: bw list items --search "Name" | jq -r '.[].id'
+#   Typ             password = Login-Passwort -> sshpass
+#                   key      = privater Schlüssel (Bitwarden-SSH-Key-Item,
+#                              Custom-Field "ssh_private_key" oder Notiz)
+#                   auto     = Schlüssel bevorzugt, sonst Passwort (Standard)
+#
+# Voraussetzung: BW_ENABLED=true in config.conf
+# Pro Aufruf überschreibbar:  TAW_BW_ITEM=<id> TAW_BW_TYPE=key ssh host
+# =============================================================================
+
+# Beispiele:
+# homeserver            0b8c5d6e-1111-2222-3333-abcdefabcdef   password
+# pi@192.168.178.*      "Raspberry Pi"                         password
+# *.example.org         7f3e2a10-4444-5555-6666-abcdefabcdef   key
+# admin@vps             "VPS Root Key"                         auto
