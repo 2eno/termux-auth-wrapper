@@ -27,6 +27,10 @@ Befehle:
   test              Fingerabdruck-Dialog testen (ohne Cache)
   reset [--bw]      Auth-Cache löschen (--bw: zusätzlich Bitwarden-Session sperren)
   set-pin           Fallback-PIN festlegen (für FALLBACK_MODE=pin)
+  bw-unlock         Bitwarden einmalig entsperren und Session merken
+                    (danach genügt der Fingerabdruck)
+  map HOST [SUCHE] [password|key|auto]
+                    SSH-Host einem Bitwarden-Eintrag zuordnen (interaktive Auswahl)
   repair [--quiet]  Wrapper prüfen und bei Bedarf wiederherstellen (z. B. nach pkg upgrade)
   config [edit]     Pfad der Konfiguration ausgeben bzw. im \$EDITOR öffnen
   log [N]           letzte N Einträge des Audit-Logs (Standard 20)
@@ -276,6 +280,91 @@ _crash_hint() {
     esac
 }
 
+# Fragt auf dem Terminal Ja/Nein (Standard: Ja)
+_ask_yes() {
+    local answer
+    taw_have_tty || return 1
+    printf '%s [J/n] ' "$1" >/dev/tty
+    IFS= read -r answer </dev/tty || answer=n
+    case ${answer,,} in ""|j|ja|y|yes) return 0 ;; *) return 1 ;; esac
+}
+
+cmd_bw_unlock() {
+    taw_load_config
+    taw_bw_require || exit 1
+    if ! taw_is_true "$TAW_BW_SESSION_CACHE"; then
+        taw_info "Damit das Master-Passwort nur EINMAL nötig ist, muss die Bitwarden-Session gespeichert werden"
+        taw_hint "(Datei $_TAW_BW_SESSION_FILE, 0600; gültig bis 'termux-auth reset --bw' bzw. 'bw lock')."
+        if _ask_yes "BW_SESSION_CACHE=true setzen?"; then
+            _config_set BW_SESSION_CACHE true
+            TAW_BW_SESSION_CACHE=true
+        else
+            taw_warn "Session wird nicht gespeichert – das Master-Passwort wird bei jedem gesperrten Tresor erneut abgefragt."
+        fi
+    fi
+    taw_authenticate bw "Bitwarden entsperren" || taw_die "Authentifizierung fehlgeschlagen."
+    TAW_BW_UNLOCK_MODE=prompt
+    taw_bw_ensure_unlocked || exit 1
+    if ! taw_is_true "$TAW_BW_ENABLED"; then
+        _config_set BW_ENABLED true
+        taw_info "BW_ENABLED=true gesetzt."
+    fi
+    taw_ok "Bitwarden ist entsperrt. Ab jetzt genügt der Fingerabdruck."
+}
+
+cmd_map() {
+    local host=${1:-} search=${2:-${1:-}} type=${3:-auto} items count choice id name
+    [[ -n $host ]] || taw_die "Aufruf: termux-auth map HOST [SUCHBEGRIFF] [password|key|auto]"
+    [[ $host != *[[:space:]]* ]] || taw_die "HOST darf keine Leerzeichen enthalten."
+    case $type in password|key|auto) ;; *) taw_die "Ungültiger Typ '$type' (password|key|auto)." ;; esac
+    taw_load_config
+    taw_bw_require || exit 1
+    taw_authenticate bw "Bitwarden-Eintrag für $host auswählen" || taw_die "Authentifizierung fehlgeschlagen."
+    taw_bw_ensure_unlocked || exit 1
+
+    items=$(_taw_bw list items --search "$search" 2>/dev/null) || taw_die "Bitwarden-Suche nach '$search' fehlgeschlagen."
+    count=$(jq 'length' <<<"$items" 2>/dev/null || echo 0)
+    (( count > 0 )) || taw_die "Keine Bitwarden-Einträge zu '$search' gefunden (anderer Suchbegriff als 2. Argument?)."
+
+    jq -r 'to_entries[] | "  \(.key + 1)) \(.value.name)  [\(.value.login.username // "-")]  \(
+        if .value.sshKey.privateKey then "SSH-Schlüssel" elif .value.login.password then "Passwort" else "kein Geheimnis" end)"' <<<"$items" >&2
+    if (( count == 1 )); then
+        choice=1
+    else
+        taw_have_tty || taw_die "Mehrere Treffer und kein Terminal zur Auswahl – Suchbegriff präzisieren."
+        printf 'Eintrag wählen [1-%s]: ' "$count" >/dev/tty
+        IFS= read -r choice </dev/tty || choice=""
+    fi
+    if ! taw_is_uint "$choice" || (( 10#$choice < 1 || 10#$choice > count )); then
+        taw_die "Ungültige Auswahl."
+    fi
+    choice=$((10#$choice))
+    id=$(jq -r ".[$((choice - 1))].id" <<<"$items")
+    name=$(jq -r ".[$((choice - 1))].name" <<<"$items" | tr -d '\n#')
+    items=""
+
+    taw_ensure_dir "$(dirname "$TAW_HOSTS_FILE")" 700
+    [[ -f $TAW_HOSTS_FILE ]] || : >"$TAW_HOSTS_FILE"
+    local tmp="$TAW_HOSTS_FILE.tmp.$$"
+    awk -v h="$host" '$1 != h' "$TAW_HOSTS_FILE" >"$tmp"
+    printf '%-24s %s  %s  # %s\n' "$host" "$id" "$type" "$name" >>"$tmp"
+    chmod 600 "$tmp"
+    mv -f "$tmp" "$TAW_HOSTS_FILE"
+    taw_ok "Zugeordnet: $host -> \"$name\" ($type) in $TAW_HOSTS_FILE"
+
+    if ! taw_is_true "$TAW_BW_ENABLED"; then
+        _config_set BW_ENABLED true
+        taw_info "BW_ENABLED=true gesetzt."
+    fi
+    if [[ $type != key ]] && ! command -v sshpass >/dev/null 2>&1; then
+        taw_warn "Für Passwort-Logins wird sshpass benötigt: pkg install sshpass"
+    fi
+    if ! taw_is_true "$TAW_BW_SESSION_CACHE"; then
+        taw_hint "Tipp: 'termux-auth bw-unlock' – dann ist das Master-Passwort nur einmal nötig."
+    fi
+    taw_hint "Testen mit: ssh $host"
+}
+
 cmd_set_pin() {
     taw_load_config
     taw_have_tty || taw_die "set-pin benötigt ein Terminal."
@@ -369,6 +458,8 @@ main() {
                 taw_ok "Bitwarden-Session verworfen."
             fi ;;
         set-pin) cmd_set_pin ;;
+        bw-unlock) cmd_bw_unlock ;;
+        map)     cmd_map "$@" ;;
         repair)  cmd_repair "$@" ;;
         config)
             taw_load_config

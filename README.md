@@ -320,6 +320,22 @@ bw config server https://vault.bitwarden.eu   # nur bei EU-/Self-Hosted-Server
 bw login
 ```
 
+### Schnellstart: Fingerabdruck statt Passwort
+
+```bash
+termux-auth bw-unlock                 # EINMAL Master-Passwort, Session wird gespeichert
+termux-auth map nas "NAS"             # Host "nas" einem Bitwarden-Eintrag zuordnen (Auswahl per Nummer)
+termux-auth map pi@192.168.178.20 "Raspberry" password
+ssh nas                               # -> nur noch Fingerabdruck, Passwort kommt aus Bitwarden
+```
+
+`bw-unlock` setzt `BW_ENABLED=true` und, nach Rückfrage, `BW_SESSION_CACHE=true`. Das
+Master-Passwort ist danach erst wieder nötig, wenn der Tresor gesperrt wird, etwa durch
+`termux-auth reset --bw`, `bw lock` oder einen Logout. `map` durchsucht den Tresor, lässt
+dich den Eintrag wählen und trägt die Zuordnung in `ssh-hosts.conf` ein.
+
+### Manuelle Einrichtung
+
 1. In der Konfiguration `BW_ENABLED=true` setzen.
 2. Die Item-ID heraussuchen:
    ```bash
@@ -397,6 +413,9 @@ termux-auth diag            Schritt-für-Schritt-Diagnose der Termux:API-Verbind
 termux-auth test            Fingerabdruckdialog testen
 termux-auth reset [--bw]    Auth-Cache löschen (--bw: Bitwarden-Session verwerfen + bw lock)
 termux-auth set-pin         Fallback-PIN festlegen
+termux-auth bw-unlock       Bitwarden einmal entsperren, Session merken
+termux-auth map HOST [SUCHE] [password|key|auto]
+                            SSH-Host einem Bitwarden-Eintrag zuordnen
 termux-auth repair [-q]     Wrapper prüfen/wiederherstellen
 termux-auth config [edit]   Konfigurationspfade anzeigen / im $EDITOR öffnen
 termux-auth log [N]         letzte N Audit-Log-Einträge

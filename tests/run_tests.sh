@@ -138,6 +138,15 @@ case $1 in
     for a in "$@"; do [[ $prev == --passwordenv ]] && var=$a; prev=$a; done
     [[ -n $var && ${!var:-} == master ]] && { echo goodsession; exit 0; }
     echo "Invalid master password." >&2; exit 1 ;;
+  list)
+    [[ ${BW_SESSION:-} == goodsession || ${MOCK_BW_STATUS:-} == unlocked ]] || { echo "Vault is locked." >&2; exit 1; }
+    search=""; prev=""
+    for a in "$@"; do [[ $prev == --search ]] && search=$a; prev=$a; done
+    case $search in
+      srv)    echo '[{"id":"ID-A","name":"Server A","login":{"username":"root","password":"pa"}},{"id":"ID-B","name":"Server B #2","login":{"username":"admin","password":"pb"}}]' ;;
+      single) echo '[{"id":"ID-S","name":"Einzel","sshKey":{"privateKey":"k"}}]' ;;
+      *)      echo '[]' ;;
+    esac ;;
   get)
     [[ ${BW_SESSION:-} == goodsession || ${MOCK_BW_STATUS:-} == unlocked ]] || { echo "Vault is locked." >&2; exit 1; }
     case $3 in
@@ -526,6 +535,36 @@ if command -v python3 >/dev/null 2>&1; then
     MOCK_FP=success MOCK_BW_STATUS=locked run $TTY "Master-Passwort=falsch" -- env TAW_BW_SESSION_CACHE=false TAW_BW_FALLBACK=fail ssh myalias
     assert_contains "Falsches Master-Passwort -> Meldung" "falsches Master-Passwort" "$OUT"
     rm -f "$HOME/.local/state/termux-auth-wrapper/bw-session"
+
+    # Einrichtung: einmal Master-Passwort, danach nur Fingerabdruck
+    write_config "BW_UNLOCK_MODE=prompt"
+    rm -f "$HOME/.config/termux-auth-wrapper/ssh-hosts.conf"
+    # shellcheck disable=SC2086
+    MOCK_FP=success MOCK_BW_STATUS=locked run $TTY "setzen?=j" "Master-Passwort=master" -- termux-auth bw-unlock
+    assert_eq "bw-unlock Exit-Code 0" 0 "$RC"
+    cfg=$(cat "$HOME/.config/termux-auth-wrapper/config.conf")
+    assert_contains "bw-unlock aktiviert Session-Cache" 'BW_SESSION_CACHE="true"' "$cfg"
+    assert_contains "bw-unlock aktiviert Bitwarden" 'BW_ENABLED="true"' "$cfg"
+    assert_file "bw-unlock speichert Session" "$HOME/.local/state/termux-auth-wrapper/bw-session"
+    # shellcheck disable=SC2086
+    MOCK_FP=success MOCK_BW_STATUS=locked run $TTY "Eintrag w=2" -- termux-auth map nas srv password
+    assert_eq "map Exit-Code 0" 0 "$RC"
+    assert_contains "map listet Treffer" "Server B #2  [admin]  Passwort" "$OUT"
+    hosts=$(cat "$HOME/.config/termux-auth-wrapper/ssh-hosts.conf")
+    assert_contains "map schreibt Zuordnung" "ID-B  password  # Server B 2" "$hosts"
+    MOCK_FP=success MOCK_BW_STATUS=locked run termux-auth map nas single key </dev/null
+    hosts=$(cat "$HOME/.config/termux-auth-wrapper/ssh-hosts.conf")
+    assert_contains "map: einzelner Treffer ohne Rückfrage" "ID-S  key" "$hosts"
+    assert_eq "map ersetzt bestehende Zuordnung" 1 "$(grep -c '^nas ' <<<"$hosts")"
+    MOCK_FP=success MOCK_BW_STATUS=locked run termux-auth map nas nichts
+    assert_contains "map: keine Treffer -> Meldung" "Keine Bitwarden-Einträge" "$OUT"
+    MOCK_FP=fail run termux-auth map nas srv
+    assert_eq "map ohne Fingerabdruck verweigert" 1 "$RC"
+    # Ergebnis: ssh nutzt gespeicherte Session, kein Master-Passwort mehr
+    MOCK_FP=success MOCK_BW_STATUS=locked run termux-auth map srvhost srv password </dev/null
+    MOCK_FP=success MOCK_BW_STATUS=locked TAW_AUTH_CACHE_TIMEOUT=0 run ssh srvhost </dev/null
+    assert_not_contains "ssh nach bw-unlock ohne Master-Passwort" "Master-Passwort" "$OUT"
+    rm -f "$HOME/.local/state/termux-auth-wrapper/bw-session" "$HOME/.config/termux-auth-wrapper/ssh-hosts.conf"
 else
     printf '  (python3 nicht verfügbar – übersprungen)\n'
 fi
