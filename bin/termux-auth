@@ -165,9 +165,13 @@ cmd_diag() {
     done
     if [[ -n $su ]]; then
         # shellcheck disable=SC2016  # wird auf der Root-Seite expandiert
-        _diag_run 20 "$su" -c 'for p in com.termux com.termux.api; do echo "== $p"; dumpsys package $p | grep -E "versionName=|installerPackageName=|stopped=|enabled=" | sed -n 1,6p; done; echo "== appops com.termux.api"; cmd appops get com.termux.api 2>/dev/null | grep -E "SYSTEM_ALERT_WINDOW|RUN_ANY_IN_BACKGROUND|RUN_IN_BACKGROUND"; echo "== standby"; am get-standby-bucket com.termux.api 2>/dev/null'
-        if [[ $DIAG_RC == 0 && -n $DIAG_OUT ]]; then
+        _diag_run 20 "$su" -c 'echo "== users"; pm list users 2>/dev/null; for p in com.termux com.termux.api; do echo "== $p"; dumpsys package $p | grep -E "versionName=|installerPackageName=|User [0-9]+:|installed=|hidden=|suspended=|stopped=|enabled=|isArchived|archiveState" | sed -n 1,12p; done; echo "== pm list packages --user 0"; pm list packages --user 0 2>/dev/null | grep termux; echo "== appops com.termux.api"; cmd appops get com.termux.api 2>/dev/null | grep -E "SYSTEM_ALERT_WINDOW|RUN_ANY_IN_BACKGROUND|RUN_IN_BACKGROUND"; echo "== standby"; am get-standby-bucket com.termux.api 2>/dev/null; true'
+        if [[ -n $DIAG_OUT ]]; then
             printf '%s\n' "$DIAG_OUT" | sed 's/^/   /'
+            if ! grep -q 'package:com.termux.api' <<<"$(sed -n '/== pm list packages --user 0/,/== appops/p' <<<"$DIAG_OUT")"; then
+                _mark fail; printf 'com.termux.api ist für Benutzer 0 NICHT installiert (evtl. nur in einem anderen Profil/Private Space).\n'
+                printf '         -> su -c "pm install-existing --user 0 com.termux.api"\n'
+            fi
             if ! grep -q 'versionName=' <<<"$(sed -n '/== com.termux.api/,/== appops/p' <<<"$DIAG_OUT")"; then
                 _mark fail; printf 'App Termux:API ist NICHT installiert (das Paket termux-api allein reicht nicht).\n'
             fi
@@ -249,6 +253,15 @@ _extract_crash() {
 _crash_hint() {
     local c=$1
     case $c in
+        *"Unable to get package info for com.termux.api"*|*"not installed on user"*)
+            printf '         -> Android meldet Termux:API für Benutzer 0 als "nicht installiert", obwohl der Prozess startet.\n'
+            printf '            Mögliche Ursachen: App nur in anderem Profil/Private Space, App versteckt/archiviert,\n'
+            printf '            oder ein Root-Hiding-Modul (z. B. Hide My Applist, Shamiko, KernelSU-"Module ausblenden")\n'
+            printf '            blendet das Paket aus. Prüfen bzw. reparieren (siehe Schritt 3):\n'
+            printf '              su -c "pm install-existing --user 0 com.termux.api"\n'
+            printf '              su -c "pm unhide com.termux.api; pm unsuspend com.termux.api"\n'
+            printf '            Hilft das nicht: Termux:API deinstallieren und die APK neu installieren\n'
+            printf '            (su -c "pm install -r --user 0 /pfad/termux-api.apk").\n' ;;
         *SecurityException*|*"Permission Denial"*)
             printf '         -> Berechtigungsproblem: Termux und Termux:API aus derselben Quelle installieren\n'
             printf '            (Signatur) und Termux:API in den App-Infos alle Berechtigungen erlauben.\n' ;;

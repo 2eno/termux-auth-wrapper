@@ -283,7 +283,24 @@ assert_contains "diag: Absturz von Termux:API erkannt" "Termux:API ist abgestür
 assert_contains "diag: Stacktrace ausgegeben" "SecurityException: Permission Denial" "$OUT"
 assert_not_contains "diag: fremde App ignoriert" "com.other.app" "$OUT"
 assert_contains "diag: Hinweis zur Ursache" "Berechtigungsproblem" "$OUT"
-rm -f "$PREFIX/bin/logcat"
+# Realer Fall (Pixel/Android 17): Paket "nicht installiert für Benutzer 0"
+cat >"$PREFIX/bin/logcat" <<'EOF'
+#!/bin/sh
+[ "$3" = crash ] || exit 0
+cat <<'LOG'
+11-02 15:10:00.000 16245 16245 E AndroidRuntime: FATAL EXCEPTION: main
+11-02 15:10:00.000 16245 16245 E AndroidRuntime: Process: com.termux.api, PID: 16245
+11-02 15:10:00.000 16245 16245 E AndroidRuntime: java.lang.RuntimeException: Unable to instantiate application com.termux.api.TermuxAPIApplication package com.termux.api
+11-02 15:10:00.000 16245 16245 E AndroidRuntime: Caused by: java.lang.IllegalStateException: Unable to get package info for com.termux.api; is package not installed on user 0?
+LOG
+EOF
+printf '#!/bin/sh\n[ "$1" = list ] && [ "$2" = packages ] && echo package:com.termux\nexit 1\n' >"$PREFIX/bin/pm"
+chmod +x "$PREFIX/bin/logcat" "$PREFIX/bin/pm"
+MOCK_FP=hang run termux-auth diag
+assert_contains "diag: 'not installed on user 0' erkannt" 'Benutzer 0 als "nicht installiert"' "$OUT"
+assert_contains "diag: Paketinfos trotz rc!=0 angezeigt" "== pm list packages --user 0" "$OUT"
+assert_contains "diag: fehlendes Paket für user 0 erkannt" "pm install-existing --user 0 com.termux.api" "$OUT"
+rm -f "$PREFIX/bin/logcat" "$PREFIX/bin/pm"
 rm -f "$PREFIX/bin/dpkg-query" "$PREFIX/bin/termux-battery-status"
 
 # =============================================================================
