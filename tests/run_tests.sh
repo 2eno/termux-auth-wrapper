@@ -262,6 +262,28 @@ MOCK_FP=hang MOCK_IPC_HANG=1 run termux-auth diag
 assert_contains "diag: IPC hängt -> Hinweis Signatur/Quelle" "empfängt gar keine Anfragen" "$OUT"
 MOCK_FP=success run termux-auth diag
 assert_contains "diag: Erfolg" "Alles funktioniert" "$OUT"
+assert_contains "diag: kein Absturz" "Kein Absturz von com.termux.api" "$OUT"
+cat >"$PREFIX/bin/logcat" <<'EOF'
+#!/bin/sh
+[ "$3" = crash ] || exit 0
+cat <<'LOG'
+11-02 14:50:01.000  1111  1111 E AndroidRuntime: FATAL EXCEPTION: main
+11-02 14:50:01.000  1111  1111 E AndroidRuntime: Process: com.other.app, PID: 1111
+11-02 14:50:01.000  1111  1111 E AndroidRuntime: java.lang.NullPointerException
+11-02 14:54:01.000  2222  2222 E AndroidRuntime: FATAL EXCEPTION: main
+11-02 14:54:01.000  2222  2222 E AndroidRuntime: Process: com.termux.api, PID: 2222
+11-02 14:54:01.000  2222  2222 E AndroidRuntime: java.lang.SecurityException: Permission Denial: test
+11-02 14:54:01.000  2222  2222 E AndroidRuntime: 	at com.termux.api.TermuxApiReceiver.onReceive(TermuxApiReceiver.java:42)
+11-02 14:54:02.000  3333  3333 I ActivityManager: something else
+LOG
+EOF
+chmod +x "$PREFIX/bin/logcat"
+MOCK_FP=hang run termux-auth diag
+assert_contains "diag: Absturz von Termux:API erkannt" "Termux:API ist abgestürzt" "$OUT"
+assert_contains "diag: Stacktrace ausgegeben" "SecurityException: Permission Denial" "$OUT"
+assert_not_contains "diag: fremde App ignoriert" "com.other.app" "$OUT"
+assert_contains "diag: Hinweis zur Ursache" "Berechtigungsproblem" "$OUT"
+rm -f "$PREFIX/bin/logcat"
 rm -f "$PREFIX/bin/dpkg-query" "$PREFIX/bin/termux-battery-status"
 
 # =============================================================================

@@ -57,7 +57,7 @@ _taw_bio_attempt() {
     taw_debug "termux-fingerprint rc=$rc out=${out//$'\n'/ } err=${errtext//$'\n'/ }"
 
     if (( rc == 124 )); then
-        _taw_bio_set unavailable "Keine Antwort von Termux:API innerhalb von ${TAW_BIO_TIMEOUT}s. Entweder wurde der Dialog nicht bestätigt, oder die App 'Termux:API' reagiert nicht (Quelle/Signatur, Akku-Einschränkung, nie geöffnet). Ursache eingrenzen mit: termux-auth diag"
+        _taw_bio_set unavailable "Keine Antwort von Termux:API innerhalb von ${TAW_BIO_TIMEOUT}s. Entweder wurde der Dialog nicht bestätigt, oder die App 'Termux:API' reagiert nicht bzw. ist abgestürzt (Quelle/Signatur, Akku-Einschränkung, nie geöffnet). Ursache eingrenzen mit: termux-auth diag"
         return 1
     fi
     if (( rc == 126 || rc == 127 )); then

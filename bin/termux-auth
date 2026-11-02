@@ -214,6 +214,53 @@ cmd_diag() {
             printf '            ggf. BIO_TIMEOUT erhöhen. Erscheint der Dialog gar nicht, Termux:API aktualisieren.\n'
         fi
     fi
+
+    printf '\n7) Absturzprotokoll von Termux:API (logcat, über root)\n'
+    if [[ -n $su ]]; then
+        local crash
+        _diag_run 20 "$su" -c 'logcat -d -b crash 2>/dev/null; logcat -d -s AndroidRuntime:E 2>/dev/null'
+        crash=$(_extract_crash <<<"$DIAG_OUT")
+        if [[ -n $crash ]]; then
+            _mark fail; printf 'Termux:API ist abgestürzt. Letzter Absturz:\n'
+            printf '%s\n' "$crash" | sed 's/^/   /'
+            _crash_hint "$crash"
+        else
+            _mark ok; printf 'Kein Absturz von com.termux.api im Log gefunden.\n'
+        fi
+    else
+        _mark warn; printf 'kein su – übersprungen. Manuell: logcat -d -b crash (benötigt root/adb)\n'
+    fi
+}
+
+# Letzten "FATAL EXCEPTION"-Block von com.termux.api aus logcat extrahieren
+_extract_crash() {
+    awk '
+        /FATAL EXCEPTION/ { if (blk != "" && api) last = blk; blk = ""; api = 0; inblk = 1; n = 0 }
+        inblk && /AndroidRuntime/ {
+            if (n < 40) { line = $0; sub(/^.*AndroidRuntime[^:]*: /, "", line); blk = blk line "\n"; n++ }
+            if ($0 ~ /Process: com\.termux\.api/) api = 1
+            next
+        }
+        inblk { if (blk != "" && api) last = blk; inblk = 0 }
+        END { if (inblk && blk != "" && api) last = blk; printf "%s", last }'
+}
+
+# Hinweise zu bekannten Absturzursachen
+_crash_hint() {
+    local c=$1
+    case $c in
+        *SecurityException*|*"Permission Denial"*)
+            printf '         -> Berechtigungsproblem: Termux und Termux:API aus derselben Quelle installieren\n'
+            printf '            (Signatur) und Termux:API in den App-Infos alle Berechtigungen erlauben.\n' ;;
+        *ForegroundServiceStartNotAllowed*|*BackgroundServiceStartNotAllowed*|*"not allowed to start service"*)
+            printf '         -> Android verbietet den Hintergrunddienst: Termux:API unter Akku auf "Nicht eingeschränkt" stellen\n'
+            printf '            und Termux im Vordergrund lassen.\n' ;;
+        *ClassNotFoundException*|*NoSuchMethodError*|*NoClassDefFoundError*)
+            printf '         -> Defekte/inkompatible Installation: Termux:API deinstallieren und aus derselben Quelle\n'
+            printf '            wie Termux neu installieren, danach: pkg upgrade termux-api\n' ;;
+        *)
+            printf '         -> Bitte diesen Block melden (z. B. als Issue bei termux/termux-api) oder hier einfügen.\n' ;;
+    esac
 }
 
 cmd_set_pin() {
