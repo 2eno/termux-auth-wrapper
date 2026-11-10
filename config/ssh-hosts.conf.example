@@ -1,25 +1,25 @@
 # =============================================================================
-# termux-auth-wrapper – Zuordnung SSH-Host -> Bitwarden-Eintrag
-# Pfad: ~/.config/termux-auth-wrapper/ssh-hosts.conf
+# termux-auth-wrapper – mapping SSH host -> Bitwarden item
+# Path: ~/.config/termux-auth-wrapper/ssh-hosts.conf
 #
-# Format (eine Zuordnung pro Zeile, erste passende gewinnt):
+# Format (one mapping per line, the first match wins):
 #
-#   <host-muster>   <bitwarden-item>   [password|key|auto]
+#   <host-pattern>   <bitwarden-item>   [password|key|auto]
 #
-#   host-muster     Glob-Muster, geprüft gegen den Alias aus der Kommandozeile,
-#                   den aufgelösten Hostnamen (~/.ssh/config) sowie user@host.
-#   bitwarden-item  Item-ID (empfohlen, eindeutig) oder Name in "…" .
-#                   ID ermitteln: bw list items --search "Name" | jq -r '.[].id'
-#   Typ             password = Login-Passwort -> sshpass
-#                   key      = privater Schlüssel (Bitwarden-SSH-Key-Item,
-#                              Custom-Field "ssh_private_key" oder Notiz)
-#                   auto     = Schlüssel bevorzugt, sonst Passwort (Standard)
+#   host-pattern    glob pattern, matched against the alias from the command
+#                   line, the resolved host name (~/.ssh/config) and user@host.
+#   bitwarden-item  item ID (recommended, unique) or a name in "…" .
+#                   Find the ID: bw list items --search "Name" | jq -r '.[].id'
+#   type            password = login password -> sshpass
+#                   key      = private key (Bitwarden SSH key item, custom
+#                              field "ssh_private_key" or a note)
+#                   auto     = key preferred, otherwise password (default)
 #
-# Voraussetzung: BW_ENABLED=true in config.conf
-# Pro Aufruf überschreibbar:  TAW_BW_ITEM=<id> TAW_BW_TYPE=key ssh host
+# Requires: BW_ENABLED=true in config.conf
+# Can be overridden per call:  TAW_BW_ITEM=<id> TAW_BW_TYPE=key ssh host
 # =============================================================================
 
-# Beispiele:
+# Examples:
 # homeserver            0b8c5d6e-1111-2222-3333-abcdefabcdef   password
 # pi@192.168.178.*      "Raspberry Pi"                         password
 # *.example.org         7f3e2a10-4444-5555-6666-abcdefabcdef   key

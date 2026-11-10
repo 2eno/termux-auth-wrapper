@@ -1,15 +1,15 @@
 # shellcheck shell=bash
-# shellcheck disable=SC2153  # TAW_*-Werte stammen aus taw_load_config
+# shellcheck disable=SC2153  # TAW_* values come from taw_load_config
 # =============================================================================
-# termux-auth-wrapper – Authentifizierungs-Ablauf
+# termux-auth-wrapper – authentication flow
 #
-#   taw_authenticate <cache-key> <Beschreibung> [nicht-interaktiv: true|false]
+#   taw_authenticate <cache-key> <description> [non-interactive: true|false]
 #
-#   1. gültiger Auth-Cache (Gnadenfrist)?          -> OK, ohne Dialog
-#   2. Lock holen (parallele Aufrufe aus Skripten teilen sich EINEN Dialog)
-#   3. Fingerabdruck (check_biometric.sh)
-#   4. ggf. Fallback (PIN / allow) laut Konfiguration
-#   5. Cache aktualisieren, Audit-Log schreiben
+#   1. valid auth cache (grace period)?            -> OK, no dialog
+#   2. take the lock (parallel calls from scripts share ONE dialog)
+#   3. fingerprint (check_biometric.sh)
+#   4. fallback (PIN / allow) if configured
+#   5. update the cache, write the audit log
 # =============================================================================
 
 [[ -n "${_TAW_AUTH_LOADED:-}" ]] && return 0
@@ -23,17 +23,17 @@ source "$_taw_auth_dir/check_biometric.sh"
 
 TAW_AUTH_METHOD=""
 
-# --- Auth-Cache --------------------------------------------------------------
+# --- Auth cache --------------------------------------------------------------
 _taw_boot_id() {
     cat /proc/sys/kernel/random/boot_id 2>/dev/null || printf 'unknown'
 }
 
-# Kennung der Terminal-Sitzung (tty_nr + Session-ID aus /proc/self/stat).
-# Funktioniert auch, wenn stdin/stdout umgeleitet sind (Skripte, Pipes).
+# Identifier of the terminal session (tty_nr + session ID from /proc/self/stat).
+# Also works when stdin/stdout are redirected (scripts, pipes).
 _taw_session_id() {
     local stat rest
     stat=$(cat "/proc/$$/stat" 2>/dev/null) || { printf 'nosession'; return; }
-    rest=${stat##*) }               # alles nach "(comm) "
+    rest=${stat##*) }               # everything after "(comm) "
     local -a f
     read -ra f <<<"$rest"
     # f[0]=state f[1]=ppid f[2]=pgrp f[3]=session f[4]=tty_nr
@@ -69,7 +69,7 @@ taw_cache_update() {
     (umask 077; printf '%s %s\n' "$(taw_now)" "$(_taw_boot_id)" >"$f") || true
 }
 
-# Alle Caches löschen (sudo -K, termux-auth reset)
+# Clear all caches (sudo -K, termux-auth reset)
 taw_cache_clear_all() {
     rm -f "$TAW_RUNTIME_DIR"/auth-*.ts 2>/dev/null || true
 }
@@ -80,38 +80,38 @@ taw_cache_clear() {
 
 # --- Fallback ----------------------------------------------------------------
 taw_pin_hash() {
-    # $1 = Salt, $2 = PIN
+    # $1 = salt, $2 = PIN
     printf '%s:%s' "$1" "$2" | sha256sum | cut -d' ' -f1
 }
 
 _taw_fallback_pin() {
     local stored=$TAW_FALLBACK_PIN_HASH salt hash pin try
     if [[ ! $stored =~ ^sha256:([A-Za-z0-9]+):([0-9a-f]{64})$ ]]; then
-        taw_err "FALLBACK_MODE=pin, aber FALLBACK_PIN_HASH ist nicht gesetzt/ungültig."
-        taw_hint "PIN festlegen mit: termux-auth set-pin"
+        taw_err "FALLBACK_MODE=pin, but FALLBACK_PIN_HASH is not set/invalid."
+        taw_hint "Set a PIN with: termux-auth set-pin"
         return 1
     fi
     salt=${BASH_REMATCH[1]}
     hash=${BASH_REMATCH[2]}
     if ! taw_have_tty; then
-        taw_err "PIN-Fallback benötigt ein Terminal (/dev/tty) – im Hintergrund nicht möglich."
+        taw_err "The PIN fallback needs a terminal (/dev/tty) – not possible in the background."
         return 1
     fi
     for try in 1 2 3; do
-        printf '[%s] Fallback-PIN (%s/3): ' "$TAW_COMPONENT" "$try" >/dev/tty
+        printf '[%s] Fallback PIN (%s/3): ' "$TAW_COMPONENT" "$try" >/dev/tty
         IFS= read -r -s pin </dev/tty || pin=""
         printf '\n' >/dev/tty
         if [[ -n $pin && $(taw_pin_hash "$salt" "$pin") == "$hash" ]]; then
             pin=""
             return 0
         fi
-        taw_warn "Falsche PIN."
+        taw_warn "Wrong PIN."
     done
     pin=""
     return 1
 }
 
-# Wird aufgerufen, wenn der Fingerabdruck nicht erfolgreich war.
+# Called when the fingerprint check was not successful.
 _taw_fallback() {
     case $TAW_BIO_STATUS in
         unavailable) ;;
@@ -124,43 +124,43 @@ _taw_fallback() {
     case $TAW_FALLBACK_MODE in
         none)
             if [[ $TAW_BIO_STATUS == unavailable ]]; then
-                taw_hint "Kein Fallback konfiguriert (FALLBACK_MODE=none) – Zugriff verweigert."
+                taw_hint "No fallback configured (FALLBACK_MODE=none) – access denied."
             fi
             return 1 ;;
         pin)
-            taw_info "Biometrie nicht möglich – PIN-Fallback."
+            taw_info "Biometrics not possible – using the PIN fallback."
             _taw_fallback_pin && TAW_AUTH_METHOD=pin && return 0
             return 1 ;;
         allow)
-            taw_warn "UNSICHER: FALLBACK_MODE=allow – Zugriff OHNE Authentifizierung freigegeben!"
+            taw_warn "INSECURE: FALLBACK_MODE=allow – access granted WITHOUT authentication!"
             TAW_AUTH_METHOD=fallback-allow
             return 0 ;;
     esac
     return 1
 }
 
-# --- Haupteinstieg -----------------------------------------------------------
-# taw_authenticate <cache-key> <Beschreibung> [nicht-interaktiv] [cache ignorieren]
+# --- Main entry point --------------------------------------------------------
+# taw_authenticate <cache-key> <description> [non-interactive] [ignore cache]
 taw_authenticate() {
     local key=$1 desc=$2 nonint=${3:-false} nocache=${4:-false} rc=1
     TAW_AUTH_METHOD=""
 
     if [[ $nocache != true ]] && taw_cache_valid "$key"; then
         TAW_AUTH_METHOD=cache
-        taw_debug "Gültiger Auth-Cache ($key) – kein Dialog nötig"
+        taw_debug "Valid auth cache ($key) – no dialog needed"
         return 0
     fi
     if [[ $nonint == true ]]; then
-        taw_err "Authentifizierung erforderlich, aber nicht-interaktiver Modus aktiv (kein gültiger Cache)."
+        taw_err "Authentication required, but non-interactive mode is active (no valid cache)."
         taw_audit denied noninteractive "${TAW_AUDIT_DETAIL:-$desc}"
         return 1
     fi
 
     if ! taw_lock_acquire auth "$TAW_LOCK_TIMEOUT"; then
-        taw_err "Zeitüberschreitung beim Warten auf eine andere laufende Authentifizierung (${TAW_LOCK_TIMEOUT}s)."
+        taw_err "Timed out waiting for another authentication in progress (${TAW_LOCK_TIMEOUT}s)."
         return 1
     fi
-    # Während wir gewartet haben, hat evtl. ein paralleler Aufruf authentifiziert
+    # A parallel call may have authenticated while we were waiting
     if [[ $nocache != true ]] && taw_cache_valid "$key"; then
         taw_lock_release
         TAW_AUTH_METHOD=cache

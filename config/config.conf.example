@@ -1,102 +1,102 @@
 # =============================================================================
-# termux-auth-wrapper – Konfiguration
-# Pfad: ~/.config/termux-auth-wrapper/config.conf
+# termux-auth-wrapper – configuration
+# Path: ~/.config/termux-auth-wrapper/config.conf
 #
-# Format: SCHLÜSSEL=wert  (einfache/doppelte Anführungszeichen erlaubt)
-# Die Datei wird NICHT als Shell-Code ausgeführt, sondern geparst. Erlaubt
-# sind nur die unten aufgeführten Schlüssel; ~, $HOME und $PREFIX werden
-# ersetzt. Jeder Schlüssel lässt sich pro Aufruf per Umgebungsvariable
-# TAW_<SCHLÜSSEL> überschreiben, z. B.:  TAW_DEBUG=true sudo id
+# Format: KEY=value  (single/double quotes allowed)
+# The file is NOT executed as shell code but parsed. Only the keys listed
+# below are allowed; ~, $HOME and $PREFIX are substituted. Every key can be
+# overridden per call with the environment variable TAW_<KEY>, e.g.:
+#   TAW_DEBUG=true sudo id
 # =============================================================================
 
-# --- Biometrie ---------------------------------------------------------------
-# Titel des Android-Fingerabdruckdialogs
-BIO_TITLE="Termux-Authentifizierung"
-# Max. Wartezeit (Sekunden) auf den Dialog. Schützt auch davor, dass Aufrufe
-# ewig hängen, wenn die App "Termux:API" fehlt.
+# --- Biometrics --------------------------------------------------------------
+# Title of the Android fingerprint dialog
+BIO_TITLE="Termux authentication"
+# Max. wait (seconds) for the dialog. Also prevents calls from hanging
+# forever if the "Termux:API" app is missing.
 BIO_TIMEOUT=30
-# Wie oft der Dialog bei "nicht erkannt/abgebrochen" erneut erscheint
+# How often the dialog reappears after "not recognized/cancelled"
 BIO_MAX_ATTEMPTS=2
-# Titel/Beschreibung (-t/-d) an termux-fingerprint übergeben.
-# Auf false setzen, falls die installierte termux-api-Version das nicht kann.
+# Pass title/description (-t/-d) to termux-fingerprint.
+# Set to false if the installed termux-api version can't handle it.
 BIO_DIALOG_TEXT=true
 
-# --- Auth-Cache (Gnadenfrist, wie sudo "timestamp_timeout") -----------------
-# Sekunden, die eine erfolgreiche Authentifizierung gültig bleibt.
-# 0 = jedes Mal Fingerabdruck verlangen.
+# --- Auth cache (grace period, like sudo's "timestamp_timeout") --------------
+# Seconds a successful authentication stays valid.
+# 0 = ask for the fingerprint every time.
 AUTH_CACHE_TIMEOUT=300
-# session = pro Terminal-Sitzung (Termux-Tab); Skripte erben die Sitzung
-# global  = gilt für alle Sitzungen (praktisch für Hintergrundjobs)
+# session = per terminal session (Termux tab); scripts inherit the session
+# global  = applies to all sessions (handy for background jobs)
 AUTH_CACHE_SCOPE=session
-# true = ein gemeinsamer Cache für sudo UND ssh; false = getrennt
+# true = one shared cache for sudo AND ssh; false = separate
 AUTH_CACHE_SHARED=false
-# Wie lange parallele Aufrufe auf einen laufenden Dialog warten (Sekunden)
+# How long parallel calls wait for a running dialog (seconds)
 LOCK_TIMEOUT=120
 
 # --- Fallbacks ---------------------------------------------------------------
-# Was passiert, wenn Biometrie NICHT VERFÜGBAR ist (kein Sensor, kein
-# Fingerabdruck eingerichtet, Termux:API fehlt, Timeout)?
-#   none  = Zugriff verweigern (empfohlen, "fail closed")
-#   pin   = eigene Fallback-PIN abfragen (setzen mit: termux-auth set-pin)
-#   allow = ohne Authentifizierung durchlassen  (UNSICHER, nur zum Debuggen)
+# What happens if biometrics are NOT AVAILABLE (no sensor, no fingerprint
+# enrolled, Termux:API missing, timeout)?
+#   none  = deny access (recommended, "fail closed")
+#   pin   = ask for your own fallback PIN (set it with: termux-auth set-pin)
+#   allow = let it through without authentication  (INSECURE, debugging only)
 FALLBACK_MODE=none
-# Fallback auch nach ABGELEHNTEM/abgebrochenem Fingerabdruck anbieten?
+# Also offer the fallback after a REJECTED/cancelled fingerprint?
 FALLBACK_ON_REJECT=false
-# Wird von "termux-auth set-pin" gesetzt (Format sha256:SALT:HASH)
+# Set by "termux-auth set-pin" (format sha256:SALT:HASH)
 FALLBACK_PIN_HASH=""
 
 # --- sudo --------------------------------------------------------------------
 SUDO_ENABLED=true
-# Pfad zu su; "auto" sucht /system/bin/su (KernelSU), /data/adb/ksu/bin/su, …
+# Path to su; "auto" searches /system/bin/su (KernelSU), /data/adb/ksu/bin/su, …
 SU_BINARY=auto
-# Termux-Umgebung (PATH, PREFIX, TERM, LD_PRELOAD) an die Root-Seite übergeben
+# Pass the Termux environment (PATH, PREFIX, TERM, LD_PRELOAD) to the root side
 SUDO_PRESERVE_TERMUX_ENV=true
-# HOME für root: suroot (= ~/.suroot, wie tsu), keep (= dein HOME) oder ein Pfad
+# HOME for root: suroot (= ~/.suroot, like tsu), keep (= your HOME) or a path
 SUDO_HOME=suroot
-# Shell für "sudo", "sudo -s", "sudo -i": auto = $PREFIX/bin/bash
+# Shell for "sudo", "sudo -s", "sudo -i": auto = $PREFIX/bin/bash
 SUDO_SHELL=auto
-# KernelSU "--mount-master" (globaler Mount-Namespace) verwenden
+# Use KernelSU "--mount-master" (global mount namespace)
 SUDO_MOUNT_MASTER=false
-# Warnen, wenn pkg/apt/dpkg per sudo gestartet wird
+# Warn when pkg/apt/dpkg is started with sudo
 SUDO_WARN_PKG=true
 
 # --- ssh ---------------------------------------------------------------------
 SSH_ENABLED=true
-# Pfad zum echten ssh; "auto" = gesichertes Original bzw. $PATH-Suche
+# Path to the real ssh; "auto" = saved original or $PATH search
 SSH_BINARY=auto
-# all    = vor JEDER ssh-Verbindung Fingerabdruck
-# mapped = nur bei Hosts, die in ssh-hosts.conf eingetragen sind
+# all    = fingerprint before EVERY ssh connection
+# mapped = only for hosts listed in ssh-hosts.conf
 SSH_AUTH_SCOPE=all
-# Leerzeichengetrennte Host-Muster OHNE Fingerabdruck (z. B. für git)
+# Space-separated host patterns WITHOUT fingerprint (e.g. for git)
 SSH_SKIP_HOSTS=""
-# Übergabe privater Schlüssel aus Bitwarden:
-#   auto = ssh-agent, falls erreichbar, sonst temporäre Datei
+# How private keys from Bitwarden are handed over:
+#   auto = ssh-agent if reachable, otherwise a temporary file
 #   agent / tempfile
 SSH_KEY_METHOD=auto
-# Lebensdauer (Sekunden) eines per ssh-add geladenen Schlüssels
+# Lifetime (seconds) of a key loaded with ssh-add
 SSH_AGENT_KEY_LIFETIME=300
 
 # --- Bitwarden CLI (bw) ------------------------------------------------------
-# Zugangsdaten für Hosts aus ssh-hosts.conf über Bitwarden beziehen
+# Get credentials for hosts from ssh-hosts.conf from Bitwarden
 BW_ENABLED=false
-# Gesperrter Tresor: prompt = Master-Passwort im Terminal abfragen
-#                    never  = abbrechen (BW_SESSION muss exportiert sein)
+# Locked vault: prompt = ask for the master password in the terminal
+#               never  = abort (BW_SESSION must be exported)
 BW_UNLOCK_MODE=prompt
-# BW_SESSION in ~/.local/state/termux-auth-wrapper/bw-session (0600) merken
-# Bequemer, aber: wer diese Datei liest, kann den Tresor lesen.
+# Remember BW_SESSION in ~/.local/state/termux-auth-wrapper/bw-session (0600)
+# More convenient, but: whoever can read this file can read the vault.
 BW_SESSION_CACHE=false
-# Zeitlimit für bw-Aufrufe (Sekunden)
+# Time limit for bw calls (seconds)
 BW_TIMEOUT=60
-# Vor dem Abruf "bw sync" ausführen (langsamer, dafür aktuell)
+# Run "bw sync" before fetching (slower, but up to date)
 BW_SYNC=false
-# Wenn Bitwarden nicht liefert: prompt = normal weiter (ssh fragt selbst)
-#                               fail   = Verbindung abbrechen
+# If Bitwarden delivers nothing: prompt = continue normally (ssh asks itself)
+#                                fail   = abort the connection
 BW_FALLBACK=prompt
 
-# --- Allgemein ---------------------------------------------------------------
-# Audit-Log unter ~/.local/state/termux-auth-wrapper/audit.log
+# --- General -----------------------------------------------------------------
+# Audit log at ~/.local/state/termux-auth-wrapper/audit.log
 AUDIT_LOG=true
-# Vollständige sudo-Befehlszeilen loggen (können Geheimnisse enthalten!)
+# Log full sudo command lines (may contain secrets!)
 AUDIT_LOG_ARGS=false
 DEBUG=false
 # auto | always | never
