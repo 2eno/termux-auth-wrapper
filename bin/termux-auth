@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # TERMUX_AUTH_WRAPPER_MARKER
-# shellcheck disable=SC2153  # TAW_*-Werte stammen aus taw_load_config
+# shellcheck disable=SC2153  # TAW_* values come from taw_load_config
 # =============================================================================
-# termux-auth – Verwaltungswerkzeug für termux-auth-wrapper
+# termux-auth – management tool for termux-auth-wrapper
 # =============================================================================
 set -euo pipefail
 
@@ -10,7 +10,7 @@ TAW_COMPONENT="termux-auth"
 _taw_lib="@TAW_LIB_DIR@"
 [[ -d $_taw_lib ]] || _taw_lib="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib"
 # shellcheck source=lib/auth.sh
-source "$_taw_lib/auth.sh" || { echo "[termux-auth] Fehler: Bibliothek nicht gefunden ($_taw_lib)" >&2; exit 1; }
+source "$_taw_lib/auth.sh" || { echo "[termux-auth] error: library not found ($_taw_lib)" >&2; exit 1; }
 # shellcheck source=lib/bitwarden.sh
 source "$_taw_lib/bitwarden.sh"
 # shellcheck source=lib/install-lib.sh
@@ -18,38 +18,38 @@ source "$_taw_lib/install-lib.sh"
 
 usage() {
     cat <<EOF
-Aufruf: termux-auth <Befehl> [Optionen]
+Usage: termux-auth <command> [options]
 
-Befehle:
-  status            Installationszustand, Abhängigkeiten und Konfiguration anzeigen
-  doctor            wie status, zusätzlich Live-Prüfungen (su, Bitwarden)
-  diag              Schritt-für-Schritt-Diagnose der Termux:API-Verbindung
-  test              Fingerabdruck-Dialog testen (ohne Cache)
-  reset [--bw]      Auth-Cache löschen (--bw: zusätzlich Bitwarden-Session sperren)
-  set-pin           Fallback-PIN festlegen (für FALLBACK_MODE=pin)
-  bw-unlock         Bitwarden einmalig entsperren und Session merken
-                    (danach genügt der Fingerabdruck)
-  map HOST [SUCHE] [password|key|auto]
-                    SSH-Host einem Bitwarden-Eintrag zuordnen (interaktive Auswahl)
-  repair [--quiet]  Wrapper prüfen und bei Bedarf wiederherstellen (z. B. nach pkg upgrade)
-  config [edit]     Pfad der Konfiguration ausgeben bzw. im \$EDITOR öffnen
-  log [N]           letzte N Einträge des Audit-Logs (Standard 20)
-  version           Version anzeigen
-  help              diese Hilfe
+Commands:
+  status            show installation state, dependencies and configuration
+  doctor            like status, plus live checks (su, Bitwarden)
+  diag              step-by-step diagnosis of the Termux:API connection
+  test              test the fingerprint dialog (without cache)
+  reset [--bw]      clear the auth cache (--bw: also lock the Bitwarden session)
+  set-pin           set the fallback PIN (for FALLBACK_MODE=pin)
+  bw-unlock         unlock Bitwarden once and remember the session
+                    (after that, the fingerprint is enough)
+  map HOST [SEARCH] [password|key|auto]
+                    map an SSH host to a Bitwarden item (interactive selection)
+  repair [--quiet]  check the wrappers and restore them if needed (e.g. after pkg upgrade)
+  config [edit]     print the config path or open it in \$EDITOR
+  log [N]           last N entries of the audit log (default 20)
+  version           show the version
+  help              this help
 EOF
 }
 
 _mark() { if [[ $1 == ok ]]; then printf '  [ OK ] '; elif [[ $1 == warn ]]; then printf '  [ !! ] '; else printf '  [FAIL] '; fi; }
 
 _check_cmd() {
-    # $1 = Befehl, $2 = Paket/Hinweis, $3 = required|optional
+    # $1 = command, $2 = package/hint, $3 = required|optional
     local p
     if p=$(command -v "$1" 2>/dev/null); then
         _mark ok; printf '%-20s %s\n' "$1" "$p"
     elif [[ $3 == required ]]; then
-        _mark fail; printf '%-20s fehlt -> %s\n' "$1" "$2"
+        _mark fail; printf '%-20s missing -> %s\n' "$1" "$2"
     else
-        _mark warn; printf '%-20s fehlt (optional) -> %s\n' "$1" "$2"
+        _mark warn; printf '%-20s missing (optional) -> %s\n' "$1" "$2"
     fi
 }
 
@@ -60,7 +60,7 @@ cmd_status() {
 
     printf 'Installation:\n'
     if inst_read_state "$TAW_LIB_DIR"; then
-        printf '  Modus: %s   Wrapper-Verzeichnis: %s\n' "$INST_MODE" "$INST_BIN_DIR"
+        printf '  Mode: %s   Wrapper directory: %s\n' "$INST_MODE" "$INST_BIN_DIR"
         local w state resolved real
         for w in $INST_WRAPPERS; do
             state=$(inst_wrapper_state "$w")
@@ -72,24 +72,24 @@ cmd_status() {
             else
                 _mark warn
             fi
-            printf '%-6s Zustand=%s, PATH->%s, echtes Binary=%s\n' "$w" "$state" "${resolved:-nicht gefunden}" "${real:-?}"
+            printf '%-6s state=%s, PATH->%s, real binary=%s\n' "$w" "$state" "${resolved:-not found}" "${real:-?}"
             if [[ -n $resolved && $resolved != "$INST_BIN_DIR/$w" ]]; then
-                printf '         -> %s steht im PATH vor %s. PATH-Reihenfolge prüfen!\n' "$resolved" "$INST_BIN_DIR"
+                printf '         -> %s comes before %s in PATH. Check the PATH order!\n' "$resolved" "$INST_BIN_DIR"
             fi
             if [[ $state != ok ]]; then
-                printf '         -> "termux-auth repair" ausführen\n'
+                printf '         -> run "termux-auth repair"\n'
             fi
         done
         if [[ $INST_APT_HOOK == true ]]; then
             if [[ -f $(inst_apt_hook) ]]; then _mark ok; else _mark warn; fi
-            printf 'apt-Hook %s\n' "$(inst_apt_hook)"
+            printf 'apt hook %s\n' "$(inst_apt_hook)"
         fi
     else
-        _mark warn; printf 'Kein Installationszustand gefunden (Entwicklungsmodus?)\n'
+        _mark warn; printf 'No installation state found (development mode?)\n'
     fi
 
-    printf '\nAbhängigkeiten:\n'
-    _check_cmd termux-fingerprint "pkg install termux-api + App 'Termux:API'" required
+    printf '\nDependencies:\n'
+    _check_cmd termux-fingerprint "pkg install termux-api + the 'Termux:API' app" required
     _check_cmd jq "pkg install jq" required
     _check_cmd timeout "pkg install coreutils" required
     _check_cmd sha256sum "pkg install coreutils" optional
@@ -102,24 +102,24 @@ cmd_status() {
     for c in "${TAW_SU_BINARY/#auto/}" /system/bin/su /data/adb/ksu/bin/su /system/xbin/su /sbin/su; do
         [[ -n $c && -x $c ]] && { su=$c; break; }
     done
-    if [[ -n $su ]]; then _mark ok; printf 'su gefunden: %s\n' "$su"
-    else _mark fail; printf 'kein su gefunden – KernelSU aktiv und Termux freigegeben?\n'; fi
+    if [[ -n $su ]]; then _mark ok; printf 'su found: %s\n' "$su"
+    else _mark fail; printf 'no su found – is KernelSU active and Termux granted?\n'; fi
     if [[ $live == true && -n $su ]]; then
         local uid
         if uid=$(timeout 15 "$su" -c 'id -u' </dev/null 2>/dev/null) && [[ $uid == 0 ]]; then
-            _mark ok; printf 'su -c funktioniert (uid 0)\n'
+            _mark ok; printf 'su -c works (uid 0)\n'
         else
-            _mark fail; printf 'su -c lieferte kein root – in der KernelSU-App Termux Root-Rechte gewähren\n'
+            _mark fail; printf 'su -c did not give root – grant Termux root access in the KernelSU app\n'
         fi
     fi
 
-    printf '\nKonfiguration: %s%s\n' "$TAW_CONFIG_FILE" "$([[ -f $TAW_CONFIG_FILE ]] || printf ' (fehlt – Standardwerte)')"
-    printf '  Auth-Cache: %ss (Scope %s)   Fallback: %s   Biometrie-Timeout: %ss\n' \
+    printf '\nConfiguration: %s%s\n' "$TAW_CONFIG_FILE" "$([[ -f $TAW_CONFIG_FILE ]] || printf ' (missing – defaults)')"
+    printf '  Auth cache: %ss (scope %s)   Fallback: %s   Biometric timeout: %ss\n' \
         "$TAW_AUTH_CACHE_TIMEOUT" "$TAW_AUTH_CACHE_SCOPE" "$TAW_FALLBACK_MODE" "$TAW_BIO_TIMEOUT"
-    printf '  sudo: %s   ssh: %s (Scope %s)   Bitwarden: %s\n' \
+    printf '  sudo: %s   ssh: %s (scope %s)   Bitwarden: %s\n' \
         "$TAW_SUDO_ENABLED" "$TAW_SSH_ENABLED" "$TAW_SSH_AUTH_SCOPE" "$TAW_BW_ENABLED"
     if [[ $TAW_FALLBACK_MODE == allow ]]; then
-        _mark warn; printf 'FALLBACK_MODE=allow ist UNSICHER\n'
+        _mark warn; printf 'FALLBACK_MODE=allow is INSECURE\n'
     fi
 
     if [[ $live == true ]] && taw_is_true "$TAW_BW_ENABLED"; then
@@ -131,12 +131,12 @@ cmd_status() {
             if [[ $st == unlocked ]]; then _mark ok; else _mark warn; fi
             printf 'Status: %s\n' "$st"
         else
-            _mark fail; printf 'bw nicht installiert\n'
+            _mark fail; printf 'bw not installed\n'
         fi
     fi
 }
 
-# Führt einen Befehl mit Zeitlimit aus; setzt DIAG_OUT und DIAG_RC
+# Runs a command with a time limit; sets DIAG_OUT and DIAG_RC
 _diag_run() {
     local t=$1; shift
     DIAG_RC=0
@@ -146,101 +146,101 @@ _diag_run() {
 cmd_diag() {
     taw_load_config
     local v su="" c pkg_ok=true ipc_ok=false
-    printf 'Termux:API-Diagnose\n\n'
+    printf 'Termux:API diagnosis\n\n'
 
-    printf '1) Termux-App\n'
+    printf '1) Termux app\n'
     printf '   TERMUX_VERSION=%s  TERMUX_APK_RELEASE=%s\n' "${TERMUX_VERSION:-?}" "${TERMUX_APK_RELEASE:-?}"
     if [[ ${TERMUX_APK_RELEASE:-} == GOOGLE_PLAY_STORE ]]; then
-        _mark warn; printf 'Termux aus dem Play Store: Termux:API muss ebenfalls aus dem Play Store kommen.\n'
+        _mark warn; printf 'Termux from the Play Store: Termux:API must come from the Play Store too.\n'
     elif [[ -z ${TERMUX_VERSION:-} ]]; then
-        _mark warn; printf 'TERMUX_VERSION fehlt: sehr alte Termux-App (z. B. alter Play-Store-Stand)? Aktuelle Version von F-Droid/GitHub empfohlen.\n'
+        _mark warn; printf 'TERMUX_VERSION missing: a very old Termux app (e.g. an old Play Store build)? The current version from F-Droid/GitHub is recommended.\n'
     fi
 
-    printf '\n2) Paket termux-api\n'
+    printf '\n2) Package termux-api\n'
     if v=$(dpkg-query -W -f='${Version}' termux-api 2>/dev/null); then
         _mark ok; printf 'termux-api %s\n' "$v"
     else
-        _mark fail; printf 'Paket termux-api nicht installiert -> pkg install termux-api\n'; pkg_ok=false
+        _mark fail; printf 'Package termux-api not installed -> pkg install termux-api\n'; pkg_ok=false
     fi
 
-    printf '\n3) App com.termux.api (über root, nur lesend)\n'
+    printf '\n3) App com.termux.api (via root, read-only)\n'
     for c in "${TAW_SU_BINARY/#auto/}" /system/bin/su /data/adb/ksu/bin/su /system/xbin/su; do
         [[ -n $c && -x $c ]] && { su=$c; break; }
     done
     if [[ -n $su ]]; then
-        # shellcheck disable=SC2016  # wird auf der Root-Seite expandiert
+        # shellcheck disable=SC2016  # expanded on the root side
         _diag_run 20 "$su" -c 'echo "== users"; pm list users 2>/dev/null; for p in com.termux com.termux.api; do echo "== $p"; dumpsys package $p | grep -E "versionName=|installerPackageName=|User [0-9]+:|installed=|hidden=|suspended=|stopped=|enabled=|isArchived|archiveState" | sed -n 1,12p; done; echo "== pm list packages --user 0"; pm list packages --user 0 2>/dev/null | grep termux; echo "== appops com.termux.api"; cmd appops get com.termux.api 2>/dev/null | grep -E "SYSTEM_ALERT_WINDOW|RUN_ANY_IN_BACKGROUND|RUN_IN_BACKGROUND"; echo "== standby"; am get-standby-bucket com.termux.api 2>/dev/null; true'
         if [[ -n $DIAG_OUT ]]; then
             printf '%s\n' "$DIAG_OUT" | sed 's/^/   /'
             if ! grep -q 'package:com.termux.api' <<<"$(sed -n '/== pm list packages --user 0/,/== appops/p' <<<"$DIAG_OUT")"; then
-                _mark fail; printf 'com.termux.api ist für Benutzer 0 NICHT installiert (evtl. nur in einem anderen Profil/Private Space).\n'
+                _mark fail; printf 'com.termux.api is NOT installed for user 0 (maybe only in another profile/private space).\n'
                 printf '         -> su -c "pm install-existing --user 0 com.termux.api"\n'
             fi
             if ! grep -q 'versionName=' <<<"$(sed -n '/== com.termux.api/,/== appops/p' <<<"$DIAG_OUT")"; then
-                _mark fail; printf 'App Termux:API ist NICHT installiert (das Paket termux-api allein reicht nicht).\n'
+                _mark fail; printf 'The Termux:API app is NOT installed (the termux-api package alone is not enough).\n'
             fi
-            grep -q 'stopped=true' <<<"$DIAG_OUT" && { _mark warn; printf 'Eine App steht auf stopped=true -> Termux:API einmal öffnen bzw. nicht "Beenden erzwingen".\n'; }
-            grep -qE 'RUN_ANY_IN_BACKGROUND: (ignore|deny)' <<<"$DIAG_OUT" && { _mark warn; printf 'Hintergrund-Ausführung für Termux:API eingeschränkt -> Akku: "Nicht eingeschränkt".\n'; }
-            printf '   Hinweis: installerPackageName von com.termux und com.termux.api sollte übereinstimmen (beide F-Droid ODER beide GitHub/Play).\n'
+            grep -q 'stopped=true' <<<"$DIAG_OUT" && { _mark warn; printf 'An app is stopped=true -> open Termux:API once and do not "force stop" it.\n'; }
+            grep -qE 'RUN_ANY_IN_BACKGROUND: (ignore|deny)' <<<"$DIAG_OUT" && { _mark warn; printf 'Background execution restricted for Termux:API -> battery: "Unrestricted".\n'; }
+            printf '   Note: installerPackageName of com.termux and com.termux.api should match (both F-Droid OR both GitHub/Play).\n'
         else
-            _mark warn; printf 'Konnte Paketinfos nicht lesen (rc=%s)\n' "$DIAG_RC"
+            _mark warn; printf 'Could not read package info (rc=%s)\n' "$DIAG_RC"
         fi
     else
-        _mark warn; printf 'kein su – übersprungen\n'
+        _mark warn; printf 'no su – skipped\n'
     fi
 
-    printf '\n4) IPC-Test ohne Dialog (termux-battery-status, 10s)\n'
+    printf '\n4) IPC test without dialog (termux-battery-status, 10s)\n'
     if [[ $pkg_ok == true ]]; then
         _diag_run 10 termux-battery-status
         if [[ $DIAG_RC == 0 && $DIAG_OUT == *"{"* ]]; then
-            _mark ok; printf 'Termux:API antwortet -> die Verbindung funktioniert grundsätzlich.\n'; ipc_ok=true
+            _mark ok; printf 'Termux:API answers -> the connection works in principle.\n'; ipc_ok=true
         elif [[ $DIAG_RC == 124 ]]; then
-            _mark fail; printf 'Keine Antwort -> Termux:API empfängt gar keine Anfragen.\n'
-            printf '         Ursache fast immer: App aus anderer Quelle als Termux (Signatur), App nie geöffnet/zwangsbeendet oder Akku-Einschränkung.\n'
+            _mark fail; printf 'No answer -> Termux:API receives no requests at all.\n'
+            printf '         The cause is almost always: app from a different source than Termux (signature), app never opened/force-stopped, or a battery restriction.\n'
         else
             _mark fail; printf 'rc=%s: %s\n' "$DIAG_RC" "${DIAG_OUT:0:200}"
         fi
     fi
 
-    printf '\n5) termux-fingerprint ohne Optionen (%ss) – bitte jetzt den Sensor berühren\n' "$TAW_BIO_TIMEOUT"
+    printf '\n5) termux-fingerprint without options (%ss) – touch the sensor now\n' "$TAW_BIO_TIMEOUT"
     if [[ $pkg_ok == true ]]; then
         _diag_run "$TAW_BIO_TIMEOUT" termux-fingerprint
-        printf '   rc=%s Ausgabe: %s\n' "$DIAG_RC" "${DIAG_OUT:-<leer>}"
+        printf '   rc=%s output: %s\n' "$DIAG_RC" "${DIAG_OUT:-<empty>}"
         if [[ $DIAG_OUT == *AUTH_RESULT_SUCCESS* ]]; then
-            _mark ok; printf 'Fingerabdruck ohne Optionen funktioniert.\n'
-            printf '\n6) termux-fingerprint mit -t/-d\n'
-            _diag_run "$TAW_BIO_TIMEOUT" termux-fingerprint -t "Diagnose" -d "Test mit Titel"
-            printf '   rc=%s Ausgabe: %s\n' "$DIAG_RC" "${DIAG_OUT:-<leer>}"
+            _mark ok; printf 'Fingerprint without options works.\n'
+            printf '\n6) termux-fingerprint with -t/-d\n'
+            _diag_run "$TAW_BIO_TIMEOUT" termux-fingerprint -t "Diagnosis" -d "Test with title"
+            printf '   rc=%s output: %s\n' "$DIAG_RC" "${DIAG_OUT:-<empty>}"
             if [[ $DIAG_OUT == *AUTH_RESULT_SUCCESS* ]]; then
-                _mark ok; printf 'Alles funktioniert.\n'
+                _mark ok; printf 'Everything works.\n'
             else
-                _mark warn; printf 'Mit -t/-d klappt es nicht -> in der Konfiguration BIO_DIALOG_TEXT=false setzen.\n'
+                _mark warn; printf 'It fails with -t/-d -> set BIO_DIALOG_TEXT=false in the config.\n'
             fi
         elif [[ $DIAG_RC == 124 && $ipc_ok == true ]]; then
-            _mark fail; printf 'Nur der Dialog hängt: Android blockiert vermutlich das Öffnen der Activity.\n'
-            printf '         -> Termux:API die Berechtigung "Über anderen Apps einblenden" geben, Termux im Vordergrund lassen,\n'
-            printf '            ggf. BIO_TIMEOUT erhöhen. Erscheint der Dialog gar nicht, Termux:API aktualisieren.\n'
+            _mark fail; printf 'Only the dialog hangs: Android probably blocks opening the activity.\n'
+            printf '         -> give Termux:API the "Display over other apps" permission, keep Termux in the foreground,\n'
+            printf '            increase BIO_TIMEOUT if needed. If the dialog never appears, update Termux:API.\n'
         fi
     fi
 
-    printf '\n7) Absturzprotokoll von Termux:API (logcat, über root)\n'
+    printf '\n7) Crash log of Termux:API (logcat, via root)\n'
     if [[ -n $su ]]; then
         local crash
         _diag_run 20 "$su" -c 'logcat -d -b crash 2>/dev/null; logcat -d -s AndroidRuntime:E 2>/dev/null'
         crash=$(_extract_crash <<<"$DIAG_OUT")
         if [[ -n $crash ]]; then
-            _mark fail; printf 'Termux:API ist abgestürzt. Letzter Absturz:\n'
+            _mark fail; printf 'Termux:API has crashed. Last crash:\n'
             printf '%s\n' "$crash" | sed 's/^/   /'
             _crash_hint "$crash"
         else
-            _mark ok; printf 'Kein Absturz von com.termux.api im Log gefunden.\n'
+            _mark ok; printf 'No crash of com.termux.api found in the log.\n'
         fi
     else
-        _mark warn; printf 'kein su – übersprungen. Manuell: logcat -d -b crash (benötigt root/adb)\n'
+        _mark warn; printf 'no su – skipped. Manually: logcat -d -b crash (needs root/adb)\n'
     fi
 }
 
-# Letzten "FATAL EXCEPTION"-Block von com.termux.api aus logcat extrahieren
+# Extract the last "FATAL EXCEPTION" block of com.termux.api from logcat
 _extract_crash() {
     awk '
         /FATAL EXCEPTION/ { if (blk != "" && api) last = blk; blk = ""; api = 0; inblk = 1; n = 0 }
@@ -253,38 +253,38 @@ _extract_crash() {
         END { if (inblk && blk != "" && api) last = blk; printf "%s", last }'
 }
 
-# Hinweise zu bekannten Absturzursachen
+# Hints for known crash causes
 _crash_hint() {
     local c=$1
     case $c in
         *"Unable to get package info for com.termux.api"*|*"not installed on user"*)
-            printf '         -> Android meldet Termux:API für Benutzer 0 als "nicht installiert", obwohl der Prozess startet.\n'
-            printf '            Mögliche Ursachen: App nur in anderem Profil/Private Space, App versteckt/archiviert,\n'
-            printf '            oder ein Root-Hiding-Modul (z. B. Hide My Applist, Shamiko, KernelSU-"Module ausblenden")\n'
-            printf '            blendet das Paket aus. Prüfen bzw. reparieren (siehe Schritt 3):\n'
+            printf '         -> Android reports Termux:API as "not installed" for user 0 although the process starts.\n'
+            printf '            Possible causes: app only in another profile/private space, app hidden/archived,\n'
+            printf '            or a root-hiding module (e.g. Hide My Applist, Shamiko, KernelSU "hide modules")\n'
+            printf '            hides the package. Check or repair (see step 3):\n'
             printf '              su -c "pm install-existing --user 0 com.termux.api"\n'
             printf '              su -c "pm unhide com.termux.api; pm unsuspend com.termux.api"\n'
-            printf '            Hilft das nicht: Termux:API deinstallieren und die APK neu installieren\n'
-            printf '            (su -c "pm install -r --user 0 /pfad/termux-api.apk").\n' ;;
+            printf '            If that does not help: uninstall Termux:API and reinstall the APK\n'
+            printf '            (su -c "pm install -r --user 0 /path/termux-api.apk").\n' ;;
         *SecurityException*|*"Permission Denial"*)
-            printf '         -> Berechtigungsproblem: Termux und Termux:API aus derselben Quelle installieren\n'
-            printf '            (Signatur) und Termux:API in den App-Infos alle Berechtigungen erlauben.\n' ;;
+            printf '         -> permission problem: install Termux and Termux:API from the same source\n'
+            printf '            (signature) and allow all permissions for Termux:API in the app info.\n' ;;
         *ForegroundServiceStartNotAllowed*|*BackgroundServiceStartNotAllowed*|*"not allowed to start service"*)
-            printf '         -> Android verbietet den Hintergrunddienst: Termux:API unter Akku auf "Nicht eingeschränkt" stellen\n'
-            printf '            und Termux im Vordergrund lassen.\n' ;;
+            printf '         -> Android forbids the background service: set Termux:API to "Unrestricted" under battery\n'
+            printf '            and keep Termux in the foreground.\n' ;;
         *ClassNotFoundException*|*NoSuchMethodError*|*NoClassDefFoundError*)
-            printf '         -> Defekte/inkompatible Installation: Termux:API deinstallieren und aus derselben Quelle\n'
-            printf '            wie Termux neu installieren, danach: pkg upgrade termux-api\n' ;;
+            printf '         -> broken/incompatible installation: uninstall Termux:API and reinstall it from the same source\n'
+            printf '            as Termux, then: pkg upgrade termux-api\n' ;;
         *)
-            printf '         -> Bitte diesen Block melden (z. B. als Issue bei termux/termux-api) oder hier einfügen.\n' ;;
+            printf '         -> please report this block (e.g. as an issue at termux/termux-api) or paste it here.\n' ;;
     esac
 }
 
-# Fragt auf dem Terminal Ja/Nein (Standard: Ja)
+# Asks yes/no on the terminal (default: yes); also accepts the German j/ja
 _ask_yes() {
     local answer
     taw_have_tty || return 1
-    printf '%s [J/n] ' "$1" >/dev/tty
+    printf '%s [Y/n] ' "$1" >/dev/tty
     IFS= read -r answer </dev/tty || answer=n
     case ${answer,,} in ""|j|ja|y|yes) return 0 ;; *) return 1 ;; esac
 }
@@ -293,50 +293,50 @@ cmd_bw_unlock() {
     taw_load_config
     taw_bw_require || exit 1
     if ! taw_is_true "$TAW_BW_SESSION_CACHE"; then
-        taw_info "Damit das Master-Passwort nur EINMAL nötig ist, muss die Bitwarden-Session gespeichert werden"
-        taw_hint "(Datei $_TAW_BW_SESSION_FILE, 0600; gültig bis 'termux-auth reset --bw' bzw. 'bw lock')."
-        if _ask_yes "BW_SESSION_CACHE=true setzen?"; then
+        taw_info "For the master password to be needed only ONCE, the Bitwarden session has to be stored"
+        taw_hint "(file $_TAW_BW_SESSION_FILE, 0600; valid until 'termux-auth reset --bw' or 'bw lock')."
+        if _ask_yes "Set BW_SESSION_CACHE=true?"; then
             _config_set BW_SESSION_CACHE true
             TAW_BW_SESSION_CACHE=true
         else
-            taw_warn "Session wird nicht gespeichert – das Master-Passwort wird bei jedem gesperrten Tresor erneut abgefragt."
+            taw_warn "Session will not be stored – the master password will be asked again whenever the vault is locked."
         fi
     fi
-    taw_authenticate bw "Bitwarden entsperren" || taw_die "Authentifizierung fehlgeschlagen."
+    taw_authenticate bw "Unlock Bitwarden" || taw_die "Authentication failed."
     TAW_BW_UNLOCK_MODE=prompt
     taw_bw_ensure_unlocked || exit 1
     if ! taw_is_true "$TAW_BW_ENABLED"; then
         _config_set BW_ENABLED true
-        taw_info "BW_ENABLED=true gesetzt."
+        taw_info "BW_ENABLED=true set."
     fi
-    taw_ok "Bitwarden ist entsperrt. Ab jetzt genügt der Fingerabdruck."
+    taw_ok "Bitwarden is unlocked. From now on the fingerprint is enough."
 }
 
 cmd_map() {
     local host=${1:-} search=${2:-${1:-}} type=${3:-auto} items count choice id name
-    [[ -n $host ]] || taw_die "Aufruf: termux-auth map HOST [SUCHBEGRIFF] [password|key|auto]"
-    [[ $host != *[[:space:]]* ]] || taw_die "HOST darf keine Leerzeichen enthalten."
-    case $type in password|key|auto) ;; *) taw_die "Ungültiger Typ '$type' (password|key|auto)." ;; esac
+    [[ -n $host ]] || taw_die "Usage: termux-auth map HOST [SEARCH TERM] [password|key|auto]"
+    [[ $host != *[[:space:]]* ]] || taw_die "HOST must not contain spaces."
+    case $type in password|key|auto) ;; *) taw_die "Invalid type '$type' (password|key|auto)." ;; esac
     taw_load_config
     taw_bw_require || exit 1
-    taw_authenticate bw "Bitwarden-Eintrag für $host auswählen" || taw_die "Authentifizierung fehlgeschlagen."
+    taw_authenticate bw "Select a Bitwarden item for $host" || taw_die "Authentication failed."
     taw_bw_ensure_unlocked || exit 1
 
-    items=$(_taw_bw list items --search "$search" 2>/dev/null) || taw_die "Bitwarden-Suche nach '$search' fehlgeschlagen."
+    items=$(_taw_bw list items --search "$search" 2>/dev/null) || taw_die "Bitwarden search for '$search' failed."
     count=$(jq 'length' <<<"$items" 2>/dev/null || echo 0)
-    (( count > 0 )) || taw_die "Keine Bitwarden-Einträge zu '$search' gefunden (anderer Suchbegriff als 2. Argument?)."
+    (( count > 0 )) || taw_die "No Bitwarden items found for '$search' (a different search term as the 2nd argument?)."
 
     jq -r 'to_entries[] | "  \(.key + 1)) \(.value.name)  [\(.value.login.username // "-")]  \(
-        if .value.sshKey.privateKey then "SSH-Schlüssel" elif .value.login.password then "Passwort" else "kein Geheimnis" end)"' <<<"$items" >&2
+        if .value.sshKey.privateKey then "SSH key" elif .value.login.password then "password" else "no secret" end)"' <<<"$items" >&2
     if (( count == 1 )); then
         choice=1
     else
-        taw_have_tty || taw_die "Mehrere Treffer und kein Terminal zur Auswahl – Suchbegriff präzisieren."
-        printf 'Eintrag wählen [1-%s]: ' "$count" >/dev/tty
+        taw_have_tty || taw_die "Several matches and no terminal to choose – narrow down the search term."
+        printf 'Choose an item [1-%s]: ' "$count" >/dev/tty
         IFS= read -r choice </dev/tty || choice=""
     fi
     if ! taw_is_uint "$choice" || (( 10#$choice < 1 || 10#$choice > count )); then
-        taw_die "Ungültige Auswahl."
+        taw_die "Invalid choice."
     fi
     choice=$((10#$choice))
     id=$(jq -r ".[$((choice - 1))].id" <<<"$items")
@@ -350,40 +350,40 @@ cmd_map() {
     printf '%-24s %s  %s  # %s\n' "$host" "$id" "$type" "$name" >>"$tmp"
     chmod 600 "$tmp"
     mv -f "$tmp" "$TAW_HOSTS_FILE"
-    taw_ok "Zugeordnet: $host -> \"$name\" ($type) in $TAW_HOSTS_FILE"
+    taw_ok "Mapped: $host -> \"$name\" ($type) in $TAW_HOSTS_FILE"
 
     if ! taw_is_true "$TAW_BW_ENABLED"; then
         _config_set BW_ENABLED true
-        taw_info "BW_ENABLED=true gesetzt."
+        taw_info "BW_ENABLED=true set."
     fi
     if [[ $type != key ]] && ! command -v sshpass >/dev/null 2>&1; then
-        taw_warn "Für Passwort-Logins wird sshpass benötigt: pkg install sshpass"
+        taw_warn "Password logins need sshpass: pkg install sshpass"
     fi
     if ! taw_is_true "$TAW_BW_SESSION_CACHE"; then
-        taw_hint "Tipp: 'termux-auth bw-unlock' – dann ist das Master-Passwort nur einmal nötig."
+        taw_hint "Tip: 'termux-auth bw-unlock' – then the master password is only needed once."
     fi
-    taw_hint "Testen mit: ssh $host"
+    taw_hint "Test with: ssh $host"
 }
 
 cmd_set_pin() {
     taw_load_config
-    taw_have_tty || taw_die "set-pin benötigt ein Terminal."
+    taw_have_tty || taw_die "set-pin needs a terminal."
     local p1 p2 salt hash
-    printf 'Neue Fallback-PIN (mind. 4 Zeichen): ' >/dev/tty
+    printf 'New fallback PIN (at least 4 characters): ' >/dev/tty
     IFS= read -r -s p1 </dev/tty; printf '\n' >/dev/tty
-    printf 'PIN wiederholen: ' >/dev/tty
+    printf 'Repeat PIN: ' >/dev/tty
     IFS= read -r -s p2 </dev/tty; printf '\n' >/dev/tty
-    [[ $p1 == "$p2" ]] || taw_die "Eingaben stimmen nicht überein."
-    (( ${#p1} >= 4 )) || taw_die "PIN zu kurz."
+    [[ $p1 == "$p2" ]] || taw_die "The entries do not match."
+    (( ${#p1} >= 4 )) || taw_die "PIN too short."
     salt=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
     hash=$(taw_pin_hash "$salt" "$p1")
     p1="" p2=""
     _config_set FALLBACK_PIN_HASH "sha256:$salt:$hash"
-    taw_ok "PIN gespeichert in $TAW_CONFIG_FILE"
-    [[ $TAW_FALLBACK_MODE == pin ]] || taw_hint "Zum Aktivieren in der Konfiguration setzen: FALLBACK_MODE=pin"
+    taw_ok "PIN stored in $TAW_CONFIG_FILE"
+    [[ $TAW_FALLBACK_MODE == pin ]] || taw_hint "To activate it, set in the config: FALLBACK_MODE=pin"
 }
 
-# Setzt KEY="wert" in der Konfigurationsdatei (ersetzt bzw. ergänzt)
+# Sets KEY="value" in the config file (replaces or appends)
 _config_set() {
     local key=$1 value=$2 f=$TAW_CONFIG_FILE tmp
     taw_ensure_dir "$(dirname "$f")" 700
@@ -402,32 +402,32 @@ cmd_repair() {
     local quiet=false w state changed=0
     [[ ${1:-} == --quiet || ${1:-} == -q ]] && quiet=true
     [[ $quiet == true ]] && TAW_QUIET=true
-    inst_read_state "$TAW_LIB_DIR" || taw_die "Kein Installationszustand gefunden – bitte install.sh ausführen."
+    inst_read_state "$TAW_LIB_DIR" || taw_die "No installation state found – please run install.sh."
     for w in $INST_WRAPPERS; do
         state=$(inst_wrapper_state "$w")
         if [[ $state == ok ]]; then
-            taw_info "$w: in Ordnung"
+            taw_info "$w: OK"
             continue
         fi
-        # Bei "replaced" immer melden – das deutet auf ein Paket-Update hin
-        [[ $quiet == true ]] && printf '[termux-auth] %s: Zustand "%s" – wird repariert\n' "$w" "$state" >&2
+        # Always report "replaced" – it points to a package update
+        [[ $quiet == true ]] && printf '[termux-auth] %s: state "%s" – repairing\n' "$w" "$state" >&2
         inst_place_wrapper "$w"
-        taw_ok "$w: repariert ($state)"
+        taw_ok "$w: repaired ($state)"
         changed=$((changed + 1))
     done
     if [[ $INST_APT_HOOK == true && ! -f $(inst_apt_hook) ]]; then
         inst_install_apt_hook
         changed=$((changed + 1))
     fi
-    (( changed == 0 )) && taw_info "Nichts zu tun."
+    (( changed == 0 )) && taw_info "Nothing to do."
     return 0
 }
 
 cmd_log() {
     taw_load_config
     local n=${1:-20} log="$TAW_STATE_DIR/audit.log"
-    taw_is_uint "$n" || taw_die "Ungültige Anzahl: $n"
-    [[ -f $log ]] || { taw_info "Noch kein Audit-Log vorhanden ($log)."; return 0; }
+    taw_is_uint "$n" || taw_die "Invalid count: $n"
+    [[ -f $log ]] || { taw_info "No audit log yet ($log)."; return 0; }
     tail -n "$n" "$log"
 }
 
@@ -440,7 +440,7 @@ main() {
         diag)    cmd_diag ;;
         test)
             taw_load_config
-            if taw_biometric_check "Test von termux-auth-wrapper"; then
+            if taw_biometric_check "Test of termux-auth-wrapper"; then
                 taw_ok "$TAW_BIO_REASON"
             else
                 printf 'Status: %s\n' "$TAW_BIO_STATUS" >&2
@@ -449,13 +449,13 @@ main() {
         reset|lock)
             taw_load_config
             taw_cache_clear_all
-            taw_ok "Auth-Cache gelöscht."
+            taw_ok "Auth cache cleared."
             if [[ ${1:-} == --bw ]]; then
                 taw_bw_forget_session
                 if command -v bw >/dev/null 2>&1; then
                     bw lock >/dev/null 2>&1 </dev/null || true
                 fi
-                taw_ok "Bitwarden-Session verworfen."
+                taw_ok "Bitwarden session discarded."
             fi ;;
         set-pin) cmd_set_pin ;;
         bw-unlock) cmd_bw_unlock ;;
@@ -470,7 +470,7 @@ main() {
         log)     cmd_log "$@" ;;
         version|-V|--version) printf 'termux-auth-wrapper %s\n' "$TAW_VERSION" ;;
         help|-h|--help) usage ;;
-        *) taw_err "Unbekannter Befehl: $subcmd"; usage >&2; exit 1 ;;
+        *) taw_err "Unknown command: $subcmd"; usage >&2; exit 1 ;;
     esac
 }
 

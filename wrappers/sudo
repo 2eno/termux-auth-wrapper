@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # TERMUX_AUTH_WRAPPER_MARKER
-# shellcheck disable=SC2153  # TAW_*-Werte stammen aus taw_load_config
+# shellcheck disable=SC2153  # TAW_* values come from taw_load_config
 # =============================================================================
-# sudo – Fingerabdruck-geschützter sudo-Ersatz für Termux + KernelSU
+# sudo – fingerprint-protected sudo replacement for Termux + KernelSU
 #
-# Führt nach erfolgreicher biometrischer Authentifizierung den Befehl via
-# KernelSU (su -c) als root aus. Funktioniert interaktiv und aus Skripten,
-# stdin/stdout/stderr und der Exit-Code werden unverändert durchgereicht.
+# After successful biometric authentication, runs the command as root via
+# KernelSU (su -c). Works interactively and from scripts; stdin/stdout/stderr
+# and the exit code are passed through unchanged.
 #
-#   sudo [-E] [-n] [-k] [-u BENUTZER] [-s|-i] [--] [VAR=wert ...] [BEFEHL ...]
+#   sudo [-E] [-n] [-k] [-u USER] [-s|-i] [--] [VAR=value ...] [COMMAND ...]
 #   sudo -v | -k | -K | -h | -V
 # =============================================================================
 set -euo pipefail
@@ -17,38 +17,38 @@ TAW_COMPONENT="sudo"
 _taw_lib="@TAW_LIB_DIR@"
 [[ -d $_taw_lib ]] || _taw_lib="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib"
 # shellcheck source=lib/auth.sh
-source "$_taw_lib/auth.sh" || { echo "[sudo] Fehler: Bibliothek nicht gefunden ($_taw_lib) – bitte install.sh erneut ausführen." >&2; exit 1; }
+source "$_taw_lib/auth.sh" || { echo "[sudo] error: library not found ($_taw_lib) – please run install.sh again." >&2; exit 1; }
 
 usage() {
     cat <<EOF
-Aufruf: sudo [Optionen] [--] [VAR=wert ...] BEFEHL [ARGUMENTE ...]
+Usage: sudo [options] [--] [VAR=value ...] COMMAND [ARGUMENTS ...]
 
-Führt BEFEHL nach Fingerabdruck-Bestätigung als root (KernelSU) aus.
+Runs COMMAND as root (KernelSU) after fingerprint confirmation.
 
-Optionen:
-  -u, --user BENUTZER      als BENUTZER statt root ausführen
-  -E, --preserve-env       gesamte Umgebung an su übergeben (su -p)
-  -s, --shell              Befehl über eine Shell ausführen / Root-Shell öffnen
-  -i, --login              Login-Shell als root
-  -n, --non-interactive    nie einen Dialog zeigen; nur gültigen Auth-Cache nutzen
-  -k, --reset-timestamp    Auth-Cache verwerfen (mit BEFEHL: für diesen Aufruf ignorieren)
-  -K, --remove-timestamp   alle Auth-Caches löschen
-  -v, --validate           nur authentifizieren und Cache auffrischen
-  -h, --help               diese Hilfe
-  -V, --version            Version
+Options:
+  -u, --user USER          run as USER instead of root
+  -E, --preserve-env       pass the whole environment to su (su -p)
+  -s, --shell              run the command through a shell / open a root shell
+  -i, --login              login shell as root
+  -n, --non-interactive    never show a dialog; only use a valid auth cache
+  -k, --reset-timestamp    discard the auth cache (with COMMAND: ignore it for this call)
+  -K, --remove-timestamp   delete all auth caches
+  -v, --validate           only authenticate and refresh the cache
+  -h, --help               this help
+  -V, --version            version
 
-termux-auth-wrapper $TAW_VERSION – Konfiguration: $TAW_CONFIG_FILE
+termux-auth-wrapper $TAW_VERSION – config: $TAW_CONFIG_FILE
 EOF
 }
 
-# --- KernelSU / su finden ----------------------------------------------------
+# --- Find KernelSU / su ------------------------------------------------------
 find_su() {
     if [[ -n $TAW_SU_BINARY && $TAW_SU_BINARY != auto ]]; then
         [[ -x $TAW_SU_BINARY ]] && { printf '%s' "$TAW_SU_BINARY"; return 0; }
-        taw_err "SU_BINARY='$TAW_SU_BINARY' ist nicht ausführbar."
+        taw_err "SU_BINARY='$TAW_SU_BINARY' is not executable."
         return 1
     fi
-    # KernelSU fängt execve() auf /system/bin/su ab (für freigegebene Apps).
+    # KernelSU intercepts execve() on /system/bin/su (for granted apps).
     local c
     for c in /system/bin/su /data/adb/ksu/bin/su /system/xbin/su /sbin/su \
              /debug_ramdisk/su /su/bin/su; do
@@ -57,14 +57,14 @@ find_su() {
     return 1
 }
 
-# --- Argumente ---------------------------------------------------------------
+# --- Arguments ---------------------------------------------------------------
 opt_user="" opt_env=false opt_shell=false opt_login=false opt_nonint=false
 opt_reset=false opt_remove=false opt_validate=false
 
 while (($#)); do
     case $1 in
         -u|--user)
-            [[ $# -ge 2 ]] || taw_die "Option $1 benötigt einen Benutzernamen."
+            [[ $# -ge 2 ]] || taw_die "Option $1 requires a user name."
             opt_user=$2; shift 2; continue ;;
         --user=*)            opt_user=${1#*=} ;;
         -E|--preserve-env)   opt_env=true ;;
@@ -78,12 +78,12 @@ while (($#)); do
         -V|--version)        printf 'termux-auth-wrapper sudo %s\n' "$TAW_VERSION"; exit 0 ;;
         --)                  shift; break ;;
         -[!-]?*)
-            # Kombinierte Kurzoptionen wie -Es aufspalten
+            # Split combined short options like -Es
             _rest=${1#-}; shift
             _split=()
             while [[ -n $_rest ]]; do
                 _split+=("-${_rest:0:1}")
-                # -u mit angehängtem Wert (-uroot)
+                # -u with an attached value (-uroot)
                 if [[ ${_rest:0:1} == u && ${#_rest} -gt 1 ]]; then
                     _split+=("${_rest:1}"); _rest=""; break
                 fi
@@ -92,7 +92,7 @@ while (($#)); do
             set -- "${_split[@]}" "$@"
             continue ;;
         -*)
-            taw_die "Nicht unterstützte Option: $1 (siehe sudo --help)" ;;
+            taw_die "Unsupported option: $1 (see sudo --help)" ;;
         *)  break ;;
     esac
     shift
@@ -105,25 +105,25 @@ if [[ $opt_remove == true ]]; then
     (($#)) || exit 0
 fi
 
-# -k ohne Befehl: nur Cache verwerfen (wie beim echten sudo)
+# -k without a command: only discard the cache (like the real sudo)
 if [[ $opt_reset == true && $# -eq 0 && $opt_validate == false && $opt_shell == false && $opt_login == false ]]; then
     taw_cache_clear sudo
     exit 0
 fi
 
 if ! taw_is_true "$TAW_SUDO_ENABLED"; then
-    taw_die "Der sudo-Wrapper ist deaktiviert (SUDO_ENABLED=false in $TAW_CONFIG_FILE)."
+    taw_die "The sudo wrapper is disabled (SUDO_ENABLED=false in $TAW_CONFIG_FILE)."
 fi
 
 SU_BIN=$(find_su) || {
-    taw_err "Kein su-Binary gefunden. Ist KernelSU aktiv und Termux in der KernelSU-App als Root-App freigegeben?"
-    taw_hint "Alternativ den Pfad in der Konfiguration setzen: SU_BINARY=/pfad/zu/su"
+    taw_err "No su binary found. Is KernelSU active and Termux granted root in the KernelSU app?"
+    taw_hint "Alternatively set the path in the config: SU_BINARY=/path/to/su"
     exit 1
 }
 taw_debug "su: $SU_BIN"
 
-# --- Authentifizierung -------------------------------------------------------
-desc_cmd="Root-Shell"
+# --- Authentication ----------------------------------------------------------
+desc_cmd="root shell"
 (($#)) && desc_cmd=$*
 (( ${#desc_cmd} > 160 )) && desc_cmd="${desc_cmd:0:157}..."
 if taw_is_true "$TAW_AUDIT_LOG_ARGS"; then
@@ -133,12 +133,12 @@ else
 fi
 
 if ! taw_authenticate sudo "sudo ${opt_user:+(-u $opt_user) }– $desc_cmd" "$opt_nonint" "$opt_reset"; then
-    taw_die "Authentifizierung fehlgeschlagen – Befehl wird NICHT ausgeführt." 1
+    taw_die "Authentication failed – the command will NOT be run." 1
 fi
 [[ $opt_validate == true && $# -eq 0 ]] && exit 0
 
-# --- Root-Befehl zusammenbauen -----------------------------------------------
-# Auf der Root-Seite läuft /system/bin/sh (mksh); daher POSIX-Quoting.
+# --- Build the root command --------------------------------------------------
+# The root side runs /system/bin/sh (mksh); hence POSIX quoting.
 env_part=""
 if taw_is_true "$TAW_SUDO_PRESERVE_TERMUX_ENV"; then
     case $TAW_SUDO_HOME in
@@ -158,7 +158,7 @@ if taw_is_true "$TAW_SUDO_PRESERVE_TERMUX_ENV"; then
     env_part+="; mkdir -p \"\$HOME\" 2>/dev/null; "
 fi
 
-# Führende VAR=wert-Zuweisungen (sudo FOO=bar befehl)
+# Leading VAR=value assignments (sudo FOO=bar command)
 while (($#)) && [[ $1 =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; do
     env_part+="export ${1%%=*}=$(taw_shell_quote "${1#*=}"); "
     shift
@@ -186,7 +186,7 @@ else
     if taw_is_true "$TAW_SUDO_WARN_PKG"; then
         case ${1##*/} in
             pkg|apt|apt-get|dpkg)
-                taw_warn "'$1' als root kann die Dateirechte von Termux beschädigen – normalerweise ohne sudo ausführen." ;;
+                taw_warn "'$1' as root can break Termux file permissions – normally run it without sudo." ;;
         esac
     fi
     run_part="exec $(taw_shell_join "$@")"

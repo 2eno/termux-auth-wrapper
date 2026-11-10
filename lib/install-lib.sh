@@ -1,24 +1,24 @@
 # shellcheck shell=bash
-# shellcheck disable=SC2034,SC2016  # INST_*-Variablen für Aufrufer; $PATH bewusst literal
+# shellcheck disable=SC2034,SC2016  # INST_* variables for callers; $PATH literal on purpose
 # =============================================================================
-# termux-auth-wrapper – Installations-Hilfsfunktionen
+# termux-auth-wrapper – installation helpers
 #
-# Gemeinsam genutzt von install.sh, uninstall.sh und "termux-auth repair".
-# Erwartet gesetzte Variablen:
-#   INST_PREFIX   Termux-Präfix ($PREFIX)
+# Shared by install.sh, uninstall.sh and "termux-auth repair".
+# Expects these variables to be set:
+#   INST_PREFIX   Termux prefix ($PREFIX)
 #   INST_MODE     prefix | home
-#   INST_BIN_DIR  Zielverzeichnis der Wrapper ($PREFIX/bin oder ~/.bin)
+#   INST_BIN_DIR  target directory of the wrappers ($PREFIX/bin or ~/.bin)
 #   INST_LIB_DIR  $PREFIX/lib/termux-auth-wrapper
-#   INST_REAL_DIR $PREFIX/libexec/termux-auth-wrapper (gesicherte Originale)
+#   INST_REAL_DIR $PREFIX/libexec/termux-auth-wrapper (saved originals)
 #
-# Update-Sicherheit:
-#   * Gehört eine Datei in $PREFIX/bin einem Paket (z. B. ssh -> openssh),
-#     wird sie per "dpkg-divert --local --rename" umgeleitet. Künftige
-#     "pkg upgrade"-Läufe installieren das neue Binary dann automatisch an den
-#     umgeleiteten Ort, der Wrapper bleibt unangetastet.
-#   * Zusätzlich prüft ein apt-Hook (DPkg::Post-Invoke) nach jedem pkg-Lauf
-#     die Wrapper und repariert sie bei Bedarf ("termux-auth repair").
-#   * Die Termux-APK selbst wird nie verändert.
+# Update safety:
+#   * If a file in $PREFIX/bin belongs to a package (e.g. ssh -> openssh), it
+#     is diverted with "dpkg-divert --local --rename". Future "pkg upgrade"
+#     runs then install the new binary at the diverted location automatically,
+#     and the wrapper stays untouched.
+#   * In addition, an apt hook (DPkg::Post-Invoke) checks the wrappers after
+#     every pkg run and repairs them if needed ("termux-auth repair").
+#   * The Termux APK itself is never modified.
 # =============================================================================
 
 [[ -n "${_TAW_INSTLIB_LOADED:-}" ]] && return 0
@@ -35,15 +35,15 @@ inst_state_file()  { printf '%s/install.state' "$INST_LIB_DIR"; }
 inst_apt_hook()    { printf '%s/etc/apt/apt.conf.d/99-termux-auth-wrapper' "$INST_PREFIX"; }
 
 # --- dpkg --------------------------------------------------------------------
-# Nur nutzen, wenn die dpkg-Datenbank im Präfix liegt (= echtes Termux).
-# Schützt zudem davor, auf einem Desktop-Linux die System-dpkg-DB anzufassen.
+# Only use it if the dpkg database lives in the prefix (= real Termux).
+# This also prevents touching the system dpkg DB on a desktop Linux.
 inst_dpkg_available() {
     [[ -d $INST_PREFIX/var/lib/dpkg ]] \
         && command -v dpkg >/dev/null 2>&1 \
         && command -v dpkg-divert >/dev/null 2>&1
 }
 
-# Gibt das besitzende Paket einer Datei aus (oder Exit 1)
+# Prints the package that owns a file (or exits 1)
 inst_dpkg_owner() {
     local out
     out=$(dpkg -S "$1" 2>/dev/null | grep -v '^diversion ' | head -n1) || return 1
@@ -58,30 +58,30 @@ inst_is_diverted_by_us() {
     [[ $(dpkg-divert --truename "$target" 2>/dev/null) == "$INST_REAL_DIR/$name" ]]
 }
 
-# --- Skripte mit Pfad-Ersetzung installieren ---------------------------------
+# --- Install scripts with path substitution ----------------------------------
 _inst_sed_escape() { printf '%s' "$1" | sed -e 's/[|&\\]/\\&/g'; }
 
-# inst_install_script <quelle> <ziel> [modus]
+# inst_install_script <source> <target> [mode]
 inst_install_script() {
     local src=$1 dest=$2 mode=${3:-0755} lib bash_path tmp
     lib=$(_inst_sed_escape "$INST_LIB_DIR")
     tmp="$dest.taw-new.$$"
     if [[ -x $INST_PREFIX/bin/bash ]]; then
-        # Absoluter Shebang: funktioniert auch auf der Root-Seite ohne termux-exec
+        # Absolute shebang: also works on the root side without termux-exec
         bash_path=$(_inst_sed_escape "$INST_PREFIX/bin/bash")
         sed -e "1s|^#!/usr/bin/env bash\$|#!$bash_path|" -e "s|@TAW_LIB_DIR@|$lib|g" "$src" >"$tmp"
     else
         sed -e "s|@TAW_LIB_DIR@|$lib|g" "$src" >"$tmp"
     fi
     chmod "$mode" "$tmp"
-    mv -f "$tmp" "$dest"   # atomar ersetzen (laufende Aufrufe bleiben intakt)
+    mv -f "$tmp" "$dest"   # replace atomically (running calls stay intact)
 }
 
-# --- Wrapper platzieren / entfernen ------------------------------------------
+# --- Place / remove wrappers -------------------------------------------------
 # inst_place_wrapper <name>
 inst_place_wrapper() {
     local name=$1 target="$INST_BIN_DIR/$1" tmpl="$INST_LIB_DIR/wrappers/$1" pkg
-    [[ -f $tmpl ]] || { taw_err "Vorlage fehlt: $tmpl"; return 1; }
+    [[ -f $tmpl ]] || { taw_err "Template missing: $tmpl"; return 1; }
     taw_ensure_dir "$INST_BIN_DIR" 755
 
     if [[ -e $target || -L $target ]] && ! taw_is_wrapper "$target"; then
@@ -90,21 +90,21 @@ inst_place_wrapper() {
             if inst_dpkg_available && pkg=$(inst_dpkg_owner "$target"); then
                 if ! inst_is_diverted_by_us "$name"; then
                     if ! dpkg-divert --local --rename --divert "$INST_REAL_DIR/$name" --add "$target" >/dev/null; then
-                        taw_err "dpkg-divert für $target fehlgeschlagen."
+                        taw_err "dpkg-divert failed for $target."
                         return 1
                     fi
-                    taw_info "'$name' (Paket $pkg) per dpkg-divert nach $INST_REAL_DIR/$name umgeleitet – update-sicher."
+                    taw_info "'$name' (package $pkg) diverted to $INST_REAL_DIR/$name with dpkg-divert – update-safe."
                 else
-                    # Diversion besteht, Datei wurde trotzdem ersetzt -> Original sichern
+                    # Diversion exists, but the file was replaced anyway -> save the original
                     mv -f "$target" "$INST_REAL_DIR/$name"
                 fi
             else
                 mv -f "$target" "$INST_REAL_DIR/$name"
-                taw_info "Vorhandenes '$target' gesichert nach $INST_REAL_DIR/$name."
+                taw_info "Existing '$target' saved to $INST_REAL_DIR/$name."
             fi
         else
             mv -f "$target" "$target.taw-backup"
-            taw_info "Vorhandenes '$target' gesichert als $target.taw-backup."
+            taw_info "Existing '$target' saved as $target.taw-backup."
         fi
     fi
     local tmp="$target.taw-new.$$"
@@ -117,22 +117,22 @@ inst_remove_wrapper() {
     if taw_is_wrapper "$target"; then
         rm -f "$target"
     elif [[ -e $target ]]; then
-        taw_warn "$target ist kein termux-auth-wrapper – wird nicht gelöscht."
+        taw_warn "$target is not a termux-auth-wrapper – not deleting it."
     fi
     if [[ $INST_MODE == prefix ]]; then
         if inst_is_diverted_by_us "$name"; then
             if dpkg-divert --local --rename --remove "$target" >/dev/null; then
-                taw_info "Original von '$name' wiederhergestellt (dpkg-divert entfernt)."
+                taw_info "Restored the original of '$name' (dpkg-divert removed)."
             else
-                taw_err "dpkg-divert --remove für $target fehlgeschlagen."
+                taw_err "dpkg-divert --remove failed for $target."
             fi
         elif [[ -e $INST_REAL_DIR/$name && ! -e $target ]]; then
             mv -f "$INST_REAL_DIR/$name" "$target"
-            taw_info "Original von '$name' wiederhergestellt."
+            taw_info "Restored the original of '$name'."
         fi
     elif [[ -e $target.taw-backup && ! -e $target ]]; then
         mv -f "$target.taw-backup" "$target"
-        taw_info "Sicherung von '$name' wiederhergestellt."
+        taw_info "Restored the backup of '$name'."
     fi
 }
 
@@ -144,7 +144,7 @@ inst_same_file() {
     fi
 }
 
-# Prüft einen Wrapper; gibt ok | outdated | replaced | missing aus
+# Checks a wrapper; prints ok | outdated | replaced | missing
 inst_wrapper_state() {
     local target="$INST_BIN_DIR/$1" tmpl="$INST_LIB_DIR/wrappers/$1"
     if [[ ! -e $target ]]; then
@@ -158,16 +158,16 @@ inst_wrapper_state() {
     fi
 }
 
-# --- apt-Hook ----------------------------------------------------------------
+# --- apt hook ----------------------------------------------------------------
 inst_install_apt_hook() {
     local hook dir tool
     hook=$(inst_apt_hook)
     dir=$(dirname "$hook")
     tool="$INST_BIN_DIR/termux-auth"
-    [[ -d $dir ]] || { taw_warn "apt-Konfigurationsverzeichnis fehlt ($dir) – kein Hook installiert."; return 0; }
+    [[ -d $dir ]] || { taw_warn "apt config directory missing ($dir) – no hook installed."; return 0; }
     cat >"$hook" <<EOF
-// termux-auth-wrapper: prüft nach jedem pkg/apt-Lauf, ob die Wrapper noch
-// intakt sind, und repariert sie bei Bedarf. Entfernen: uninstall.sh
+// termux-auth-wrapper: checks after every pkg/apt run whether the wrappers
+// are still intact and repairs them if needed. Remove with: uninstall.sh
 DPkg::Post-Invoke { "[ -x $tool ] && $tool repair --quiet || true"; };
 EOF
     chmod 644 "$hook"
@@ -175,13 +175,13 @@ EOF
 
 inst_remove_apt_hook() { rm -f "$(inst_apt_hook)"; }
 
-# --- PATH-Eintrag für den home-Modus -----------------------------------------
+# --- PATH entry for home mode ------------------------------------------------
 inst_profile_add() {
     local file=$1
     [[ -f $file ]] && grep -qF "$TAW_PROFILE_BEGIN" "$file" && return 0
     {
         printf '\n%s\n' "$TAW_PROFILE_BEGIN"
-        printf '%s\n' '# Wrapper-Verzeichnis VOR $PREFIX/bin, damit sudo/ssh-Wrapper greifen'
+        printf '%s\n' '# Wrapper directory BEFORE $PREFIX/bin so the sudo/ssh wrappers take effect'
         printf 'case ":$PATH:" in *":%s:"*) ;; *) export PATH="%s:$PATH" ;; esac\n' "$INST_BIN_DIR" "$INST_BIN_DIR"
         printf '%s\n' "$TAW_PROFILE_END"
     } >>"$file"
@@ -198,13 +198,13 @@ inst_profile_remove() {
     rm -f "$tmp"
 }
 
-# --- Installationszustand ----------------------------------------------------
+# --- Installation state ------------------------------------------------------
 inst_write_state() {
-    # $1 = Wrapper-Liste, $2 = apt-Hook (true/false), $3 = Profil-Dateien
+    # $1 = wrapper list, $2 = apt hook (true/false), $3 = profile files
     local f
     f=$(inst_state_file)
     {
-        printf '# Automatisch erzeugt von install.sh – nicht bearbeiten\n'
+        printf '# Generated by install.sh – do not edit\n'
         printf 'VERSION="%s"\n' "$TAW_VERSION"
         printf 'MODE="%s"\n' "$INST_MODE"
         printf 'PREFIX="%s"\n' "$INST_PREFIX"

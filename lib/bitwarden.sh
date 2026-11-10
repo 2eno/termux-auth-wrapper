@@ -1,13 +1,13 @@
 # shellcheck shell=bash
-# shellcheck disable=SC2034,SC2153  # TAW_*-Werte stammen aus taw_load_config
+# shellcheck disable=SC2034,SC2153  # TAW_* values come from taw_load_config
 # =============================================================================
-# termux-auth-wrapper – Bitwarden-CLI-Anbindung (optional)
+# termux-auth-wrapper – Bitwarden CLI integration (optional)
 #
-#   taw_bw_ensure_unlocked            -> 0, wenn BW_SESSION gültig ist
-#   taw_bw_get_secret <item> <typ>    -> setzt TAW_BW_SECRET / TAW_BW_SECRET_TYPE
-#                                        (typ: password | key | auto)
+#   taw_bw_ensure_unlocked            -> 0 if BW_SESSION is valid
+#   taw_bw_get_secret <item> <type>   -> sets TAW_BW_SECRET / TAW_BW_SECRET_TYPE
+#                                        (type: password | key | auto)
 #
-# Geheimnisse werden ausschließlich in Variablen gehalten und nie geloggt.
+# Secrets are only ever kept in variables and are never logged.
 # =============================================================================
 
 [[ -n "${_TAW_BW_LOADED:-}" ]] && return 0
@@ -20,7 +20,7 @@ TAW_BW_SECRET=""
 TAW_BW_SECRET_TYPE=""
 _TAW_BW_SESSION_FILE="$TAW_STATE_DIR/bw-session"
 
-# bw mit Zeitlimit und ohne interaktive Rückfragen ausführen
+# Run bw with a time limit and without interactive prompts
 _taw_bw() {
     local -a cmd=(bw)
     if command -v timeout >/dev/null 2>&1; then
@@ -31,15 +31,15 @@ _taw_bw() {
 
 taw_bw_require() {
     if ! command -v bw >/dev/null 2>&1; then
-        taw_err "Bitwarden CLI 'bw' nicht gefunden."
-        taw_hint "Installation: pkg install nodejs && npm install -g @bitwarden/cli"
-        taw_hint "Anschließend einmalig anmelden: bw login"
+        taw_err "Bitwarden CLI 'bw' not found."
+        taw_hint "Install: pkg install nodejs && npm install -g @bitwarden/cli"
+        taw_hint "Then sign in once: bw login"
         return 1
     fi
-    command -v jq >/dev/null 2>&1 || { taw_err "jq fehlt: pkg install jq"; return 1; }
+    command -v jq >/dev/null 2>&1 || { taw_err "jq is missing: pkg install jq"; return 1; }
 }
 
-# Gibt locked | unlocked | unauthenticated | error aus
+# Prints locked | unlocked | unauthenticated | error
 taw_bw_status() {
     local out
     out=$(_taw_bw status 2>/dev/null) || { printf 'error'; return 0; }
@@ -54,14 +54,14 @@ _taw_bw_load_cached_session() {
     s=$(<"$_TAW_BW_SESSION_FILE")
     [[ -n $s ]] || return 1
     export BW_SESSION=$s
-    taw_debug "BW_SESSION aus Cache geladen"
+    taw_debug "BW_SESSION loaded from cache"
 }
 
 _taw_bw_store_session() {
     taw_is_true "$TAW_BW_SESSION_CACHE" || return 0
     taw_ensure_dir "$TAW_STATE_DIR" 700
     (umask 077; printf '%s' "$BW_SESSION" >"$_TAW_BW_SESSION_FILE") || \
-        taw_warn "BW-Session konnte nicht zwischengespeichert werden."
+        taw_warn "Could not cache the BW session."
 }
 
 taw_bw_forget_session() {
@@ -71,28 +71,28 @@ taw_bw_forget_session() {
 _taw_bw_unlock_interactive() {
     local pw session rc=0
     if ! taw_have_tty; then
-        taw_err "Bitwarden-Tresor ist gesperrt und es steht kein Terminal zur Passworteingabe zur Verfügung."
+        taw_err "The Bitwarden vault is locked and no terminal is available to enter the password."
         return 1
     fi
-    printf '[%s] Bitwarden Master-Passwort: ' "$TAW_COMPONENT" >/dev/tty
+    printf '[%s] Bitwarden master password: ' "$TAW_COMPONENT" >/dev/tty
     IFS= read -r -s pw </dev/tty || pw=""
     printf '\n' >/dev/tty
-    [[ -n $pw ]] || { taw_err "Kein Master-Passwort eingegeben."; return 1; }
-    # Übergabe per Umgebungsvariable (--passwordenv) statt als Argument,
-    # damit das Passwort nicht in der Prozessliste erscheint.
+    [[ -n $pw ]] || { taw_err "No master password entered."; return 1; }
+    # Pass it via an environment variable (--passwordenv) instead of an
+    # argument so the password doesn't show up in the process list.
     session=$(TAW_BW_MASTER_PW=$pw _taw_bw unlock --raw --passwordenv TAW_BW_MASTER_PW 2>/dev/null) || rc=$?
     pw=""
     if (( rc != 0 )) || [[ -z $session ]]; then
         if (( rc == 124 )); then
-            taw_err "Zeitüberschreitung beim Entsperren von Bitwarden (${TAW_BW_TIMEOUT}s)."
+            taw_err "Timed out unlocking Bitwarden (${TAW_BW_TIMEOUT}s)."
         else
-            taw_err "Entsperren von Bitwarden fehlgeschlagen (falsches Master-Passwort?)."
+            taw_err "Unlocking Bitwarden failed (wrong master password?)."
         fi
         return 1
     fi
     export BW_SESSION=$session
     _taw_bw_store_session
-    taw_ok "Bitwarden entsperrt."
+    taw_ok "Bitwarden unlocked."
 }
 
 taw_bw_ensure_unlocked() {
@@ -101,34 +101,34 @@ taw_bw_ensure_unlocked() {
 
     local status
     status=$(taw_bw_status)
-    taw_debug "Bitwarden-Status: $status"
+    taw_debug "Bitwarden status: $status"
     case $status in
         unlocked)
             return 0 ;;
         unauthenticated)
-            taw_err "Nicht bei Bitwarden angemeldet."
-            taw_hint "Einmalig ausführen: bw login"
+            taw_err "Not signed in to Bitwarden."
+            taw_hint "Run once: bw login"
             return 1 ;;
         locked)
-            # Ggf. abgelaufene zwischengespeicherte Session verwerfen
+            # Discard a cached session that may have expired
             taw_bw_forget_session
             unset BW_SESSION
             if [[ $TAW_BW_UNLOCK_MODE == prompt ]]; then
                 _taw_bw_unlock_interactive
                 return
             fi
-            taw_err "Bitwarden-Tresor ist gesperrt."
-            taw_hint "Entsperren mit: export BW_SESSION=\"\$(bw unlock --raw)\""
-            taw_hint "oder in der Konfiguration BW_UNLOCK_MODE=prompt setzen."
+            taw_err "The Bitwarden vault is locked."
+            taw_hint "Unlock with: export BW_SESSION=\"\$(bw unlock --raw)\""
+            taw_hint "or set BW_UNLOCK_MODE=prompt in the config."
             return 1 ;;
         *)
-            taw_err "Bitwarden-Status konnte nicht ermittelt werden (Timeout/Netzwerk/Installation?)."
-            taw_hint "Manuell prüfen mit: bw status"
+            taw_err "Could not determine the Bitwarden status (timeout/network/installation?)."
+            taw_hint "Check manually with: bw status"
             return 1 ;;
     esac
 }
 
-# taw_bw_get_secret <item-id-oder-name> <password|key|auto>
+# taw_bw_get_secret <item-id-or-name> <password|key|auto>
 taw_bw_get_secret() {
     local ref=$1 want=${2:-auto} item err rc=0
     TAW_BW_SECRET=""
@@ -137,7 +137,7 @@ taw_bw_get_secret() {
     taw_bw_ensure_unlocked || return 1
 
     if taw_is_true "$TAW_BW_SYNC"; then
-        _taw_bw sync >/dev/null 2>&1 || taw_warn "bw sync fehlgeschlagen – verwende lokalen Stand."
+        _taw_bw sync >/dev/null 2>&1 || taw_warn "bw sync failed – using the local state."
     fi
 
     taw_ensure_dir "$TAW_RUNTIME_DIR" 700
@@ -147,14 +147,14 @@ taw_bw_get_secret() {
     err=$(head -c 300 "$errfile" 2>/dev/null || true)
     rm -f "$errfile"
     if (( rc != 0 )) || [[ -z $item ]]; then
-        taw_err "Bitwarden-Eintrag '$ref' konnte nicht gelesen werden${err:+: ${err//$'\n'/ }}"
-        [[ $err == *"More than one"* ]] && taw_hint "Eindeutige Item-ID statt Namen verwenden (bw list items --search \"$ref\")."
+        taw_err "Could not read Bitwarden item '$ref'${err:+: ${err//$'\n'/ }}"
+        [[ $err == *"More than one"* ]] && taw_hint "Use the unique item ID instead of the name (bw list items --search \"$ref\")."
         return 1
     fi
 
     local pw key
     pw=$(jq -r '.login.password // empty' <<<"$item")
-    # SSH-Schlüssel: nativer Bitwarden-SSH-Key-Typ, Custom-Field oder Notiz
+    # SSH key: native Bitwarden SSH key type, custom field or note
     key=$(jq -r '
         .sshKey.privateKey
         // ((.fields // []) | map(select(.name == "ssh_private_key" or .name == "private_key")) | .[0].value)
@@ -164,10 +164,10 @@ taw_bw_get_secret() {
 
     case $want in
         password)
-            [[ -n $pw ]] || { taw_err "Eintrag '$ref' enthält kein Passwort."; return 1; }
+            [[ -n $pw ]] || { taw_err "Item '$ref' contains no password."; return 1; }
             TAW_BW_SECRET=$pw; TAW_BW_SECRET_TYPE=password ;;
         key)
-            [[ -n $key ]] || { taw_err "Eintrag '$ref' enthält keinen privaten SSH-Schlüssel."; return 1; }
+            [[ -n $key ]] || { taw_err "Item '$ref' contains no private SSH key."; return 1; }
             TAW_BW_SECRET=$key; TAW_BW_SECRET_TYPE=key ;;
         auto)
             if [[ -n $key ]]; then
@@ -175,14 +175,14 @@ taw_bw_get_secret() {
             elif [[ -n $pw ]]; then
                 TAW_BW_SECRET=$pw; TAW_BW_SECRET_TYPE=password
             else
-                taw_err "Eintrag '$ref' enthält weder Passwort noch SSH-Schlüssel."
+                taw_err "Item '$ref' contains neither a password nor an SSH key."
                 return 1
             fi ;;
         *)
-            taw_err "Unbekannter Geheimnistyp '$want' (erlaubt: password, key, auto)."
+            taw_err "Unknown secret type '$want' (allowed: password, key, auto)."
             return 1 ;;
     esac
     pw=""; key=""
-    taw_debug "Bitwarden-Geheimnis vom Typ '$TAW_BW_SECRET_TYPE' geladen"
+    taw_debug "Loaded Bitwarden secret of type '$TAW_BW_SECRET_TYPE'"
     return 0
 }

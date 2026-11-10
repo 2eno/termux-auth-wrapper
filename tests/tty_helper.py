@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Führt einen Befehl in einem Pseudo-Terminal aus und beantwortet Prompts.
+"""Runs a command in a pseudo-terminal and answers prompts.
 
-Aufruf:  tty_helper.py "Prompt-Teiltext=Antwort" [...] -- befehl [argumente]
+Usage:  tty_helper.py "prompt substring=answer" [...] -- command [arguments]
 
-Jede Antwort wird gesendet, sobald ihr Prompt-Teiltext in der Ausgabe
-erscheint (in der angegebenen Reihenfolge). Gibt die gesamte Ausgabe aus
-und beendet sich mit dem Exit-Code des Befehls.
+Each answer is sent as soon as its prompt substring appears in the output
+(in the given order). Prints the whole output and exits with the command's
+exit code.
 """
 import os
 import pty
@@ -46,9 +46,9 @@ def main() -> int:
                 scan_from = idx + len(prompt)
                 os.write(fd, answer.encode() + b"\n")
                 answers.pop(0)
-    # Frist abgelaufen oder Ausgabe beendet: hängende Kindprozesse beenden
+    # Deadline reached or output ended: kill hanging child processes
     done, status = 0, 0
-    for _ in range(40):  # bis zu 2 s auf reguläres Ende warten
+    for _ in range(40):  # wait up to 2 s for a regular exit
         done, status = os.waitpid(pid, os.WNOHANG)
         if done:
             break
@@ -56,7 +56,7 @@ def main() -> int:
     if done == 0:
         os.kill(pid, 9)
         _, status = os.waitpid(pid, 0)
-        out += b"\n[tty_helper: Zeitlimit, Prozess beendet]\n"
+        out += b"\n[tty_helper: time limit, process killed]\n"
     sys.stdout.write(out.decode(errors="replace"))
     return os.waitstatus_to_exitcode(status)
 

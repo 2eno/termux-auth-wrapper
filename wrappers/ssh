@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 # TERMUX_AUTH_WRAPPER_MARKER
-# shellcheck disable=SC2153  # TAW_*-Werte stammen aus taw_load_config
+# shellcheck disable=SC2153  # TAW_* values come from taw_load_config
 # =============================================================================
-# ssh – Fingerabdruck-geschützter ssh-Wrapper mit optionaler Bitwarden-Anbindung
+# ssh – fingerprint-protected ssh wrapper with optional Bitwarden integration
 #
-#   1. Ziel ermitteln (inkl. ~/.ssh/config-Aliasse via "ssh -G")
-#   2. Fingerabdruck (bzw. gültiger Auth-Cache)
-#   3. Falls dem Host ein Bitwarden-Eintrag zugeordnet ist (ssh-hosts.conf):
-#        Passwort  -> sshpass (über Dateideskriptor, nicht in argv/env)
-#        Schlüssel -> ssh-agent (ssh-add -t) oder temporäre Datei (0600)
-#   4. echtes ssh mit unveränderten Argumenten ausführen
+#   1. determine the target (incl. ~/.ssh/config aliases via "ssh -G")
+#   2. fingerprint (or a valid auth cache)
+#   3. if a Bitwarden item is mapped to the host (ssh-hosts.conf):
+#        password -> sshpass (via a file descriptor, not in argv/env)
+#        key      -> ssh-agent (ssh-add -t) or a temporary file (0600)
+#   4. run the real ssh with unchanged arguments
 #
-# Per-Aufruf-Überschreibung:  TAW_BW_ITEM=<id|name> [TAW_BW_TYPE=password|key] ssh host
-# Exit-Codes wie ssh: 255 bei Verbindungs-/Authentifizierungsfehlern.
+# Per-call override:  TAW_BW_ITEM=<id|name> [TAW_BW_TYPE=password|key] ssh host
+# Exit codes like ssh: 255 on connection/authentication errors.
 # =============================================================================
 set -euo pipefail
 
@@ -20,28 +20,28 @@ TAW_COMPONENT="ssh"
 _taw_lib="@TAW_LIB_DIR@"
 [[ -d $_taw_lib ]] || _taw_lib="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib"
 # shellcheck source=lib/auth.sh
-source "$_taw_lib/auth.sh" || { echo "[ssh] Fehler: Bibliothek nicht gefunden ($_taw_lib) – bitte install.sh erneut ausführen." >&2; exit 255; }
+source "$_taw_lib/auth.sh" || { echo "[ssh] error: library not found ($_taw_lib) – please run install.sh again." >&2; exit 255; }
 # shellcheck source=lib/bitwarden.sh
 source "$_taw_lib/bitwarden.sh"
 
 taw_load_config
 
 REAL_SSH=$(taw_find_real ssh "$TAW_SSH_BINARY") || {
-    taw_err "Das echte ssh-Binary wurde nicht gefunden."
-    taw_hint "Installation: pkg install openssh   (danach ggf. 'termux-auth repair')"
+    taw_err "The real ssh binary was not found."
+    taw_hint "Install: pkg install openssh   (then 'termux-auth repair' if needed)"
     exit 255
 }
-taw_debug "echtes ssh: $REAL_SSH"
+taw_debug "real ssh: $REAL_SSH"
 
 passthrough() { exec "$REAL_SSH" "$@"; }
 
 taw_is_true "$TAW_SSH_ENABLED" || passthrough "$@"
 
-# --- Argumente analysieren ---------------------------------------------------
-# Optionen von OpenSSH, die ein Argument erwarten
+# --- Parse arguments ---------------------------------------------------------
+# OpenSSH options that take an argument
 _SSH_OPTS_WITH_ARG="BbcDEeFIiJLlmOoPpQRSWw"
 SSH_DEST=""
-SSH_NOCONNECT=false     # -V, -G, -Q, -O: keine neue Verbindung -> kein Dialog
+SSH_NOCONNECT=false     # -V, -G, -Q, -O: no new connection -> no dialog
 
 parse_ssh_args() {
     local arg flags ch i
@@ -55,7 +55,7 @@ parse_ssh_args() {
                     ch=${flags:i:1}
                     case $ch in V|G|Q|O) SSH_NOCONNECT=true ;; esac
                     if [[ $_SSH_OPTS_WITH_ARG == *"$ch"* ]]; then
-                        # Argument direkt angehängt (-p22) oder als nächstes Wort
+                        # argument attached directly (-p22) or as the next word
                         (( i + 1 < ${#flags} )) || shift
                         break
                     fi
@@ -72,7 +72,7 @@ if [[ $SSH_NOCONNECT == true || -z $SSH_DEST ]]; then
     passthrough "$@"
 fi
 
-# Ziel auflösen: ssh -G wertet ~/.ssh/config, -l, -p usw. korrekt aus
+# Resolve the target: ssh -G evaluates ~/.ssh/config, -l, -p etc. correctly
 dest_alias=${SSH_DEST#*@}
 dest_alias=${dest_alias#ssh://}
 dest_user=""
@@ -89,25 +89,25 @@ if resolved=$("$REAL_SSH" -G "$@" 2>/dev/null </dev/null); then
         esac
     done <<<"$resolved"
 fi
-taw_debug "Ziel: alias=$dest_alias host=$res_host user=$res_user port=$res_port"
+taw_debug "target: alias=$dest_alias host=$res_host user=$res_user port=$res_port"
 
 host_matches() {
-    # $1 = Muster (Glob), prüft gegen Alias, Hostname und user@host
+    # $1 = pattern (glob), matched against alias, host name and user@host
     local pat=$1
-    # shellcheck disable=SC2053  # Glob-Vergleich ist beabsichtigt
+    # shellcheck disable=SC2053  # glob comparison is intended
     [[ $dest_alias == $pat || $res_host == $pat || "$res_user@$res_host" == $pat || "$res_user@$dest_alias" == $pat ]]
 }
 
-# Hosts ohne Biometrie (z. B. github.com für git)
+# Hosts without biometrics (e.g. github.com for git)
 read -ra _skip_hosts <<<"$TAW_SSH_SKIP_HOSTS"
 for _pat in "${_skip_hosts[@]}"; do
     if host_matches "$_pat"; then
-        taw_debug "Host passt auf SSH_SKIP_HOSTS ($_pat) – kein Dialog"
+        taw_debug "Host matches SSH_SKIP_HOSTS ($_pat) – no dialog"
         passthrough "$@"
     fi
 done
 
-# --- Bitwarden-Zuordnung suchen ----------------------------------------------
+# --- Look up the Bitwarden mapping -------------------------------------------
 BW_ITEM=${TAW_BW_ITEM:-}
 BW_TYPE=${TAW_BW_TYPE:-auto}
 if [[ -z $BW_ITEM && -f $TAW_HOSTS_FILE ]]; then
@@ -123,59 +123,59 @@ if [[ -z $BW_ITEM && -f $TAW_HOSTS_FILE ]]; then
             if host_matches "$_pat"; then
                 _item=${_item#\"}; BW_ITEM=${_item%\"}
                 BW_TYPE=$_type
-                taw_debug "Zuordnung $TAW_HOSTS_FILE:$_lineno ($_pat) -> Bitwarden-Item"
+                taw_debug "Mapping $TAW_HOSTS_FILE:$_lineno ($_pat) -> Bitwarden item"
                 break
             fi
         else
-            taw_warn "Ungültige Zeile $TAW_HOSTS_FILE:$_lineno – ignoriert"
+            taw_warn "Invalid line $TAW_HOSTS_FILE:$_lineno – ignored"
         fi
     done <"$TAW_HOSTS_FILE"
 fi
 
 if [[ $TAW_SSH_AUTH_SCOPE == mapped && -z $BW_ITEM ]]; then
-    taw_debug "SSH_AUTH_SCOPE=mapped und keine Zuordnung – kein Dialog"
+    taw_debug "SSH_AUTH_SCOPE=mapped and no mapping – no dialog"
     passthrough "$@"
 fi
 
-# --- Authentifizierung -------------------------------------------------------
+# --- Authentication ----------------------------------------------------------
 target="$res_user@$res_host"
 [[ $res_port != 22 ]] && target+=":$res_port"
 TAW_AUDIT_DETAIL="target=$target"
-if ! taw_authenticate ssh "SSH-Verbindung zu $target"; then
-    taw_die "Authentifizierung fehlgeschlagen – SSH-Verbindung wird NICHT aufgebaut." 255
+if ! taw_authenticate ssh "SSH connection to $target"; then
+    taw_die "Authentication failed – the SSH connection will NOT be opened." 255
 fi
 
-# Ohne Bitwarden: normales ssh (Schlüssel/Agent/Passwortabfrage wie gewohnt)
+# Without Bitwarden: normal ssh (key/agent/password prompt as usual)
 if [[ -z $BW_ITEM ]] || ! taw_is_true "$TAW_BW_ENABLED"; then
-    [[ -n $BW_ITEM ]] && taw_debug "Zuordnung vorhanden, aber BW_ENABLED=false"
+    [[ -n $BW_ITEM ]] && taw_debug "Mapping exists, but BW_ENABLED=false"
     passthrough "$@"
 fi
 
 if ! taw_bw_get_secret "$BW_ITEM" "$BW_TYPE"; then
     if [[ $TAW_BW_FALLBACK == prompt ]]; then
-        taw_warn "Fahre ohne Bitwarden fort – ssh fragt ggf. selbst nach Passwort/Passphrase."
+        taw_warn "Continuing without Bitwarden – ssh may ask for the password/passphrase itself."
         passthrough "$@"
     fi
-    taw_die "Zugangsdaten aus Bitwarden nicht verfügbar (BW_FALLBACK=fail) – Abbruch." 255
+    taw_die "Credentials from Bitwarden not available (BW_FALLBACK=fail) – aborting." 255
 fi
 
-# --- Passwort via sshpass ----------------------------------------------------
+# --- Password via sshpass ----------------------------------------------------
 if [[ $TAW_BW_SECRET_TYPE == password ]]; then
     if ! SSHPASS_BIN=$(command -v sshpass 2>/dev/null); then
         TAW_BW_SECRET=""
         if [[ $TAW_BW_FALLBACK == prompt ]]; then
-            taw_warn "sshpass nicht installiert (pkg install sshpass) – ssh fragt selbst nach dem Passwort."
+            taw_warn "sshpass is not installed (pkg install sshpass) – ssh will ask for the password itself."
             passthrough "$@"
         fi
-        taw_die "sshpass nicht installiert: pkg install sshpass" 255
+        taw_die "sshpass is not installed: pkg install sshpass" 255
     fi
     _pw=$TAW_BW_SECRET
     TAW_BW_SECRET=""
-    # Passwort über FD 3 (Pipe) – taucht weder in argv noch in der Umgebung auf
+    # Password via FD 3 (pipe) – shows up neither in argv nor in the environment
     exec "$SSHPASS_BIN" -d 3 "$REAL_SSH" -o NumberOfPasswordPrompts=1 "$@" 3< <(printf '%s\n' "$_pw")
 fi
 
-# --- Privater Schlüssel ------------------------------------------------------
+# --- Private key -------------------------------------------------------------
 _key=$TAW_BW_SECRET
 TAW_BW_SECRET=""
 [[ $_key == *$'\n' ]] || _key+=$'\n'
@@ -185,7 +185,7 @@ agent_usable() {
     command -v ssh-add >/dev/null 2>&1 || return 1
     local rc=0
     ssh-add -l >/dev/null 2>&1 </dev/null || rc=$?
-    (( rc != 2 ))      # 2 = keine Verbindung zum Agenten
+    (( rc != 2 ))      # 2 = no connection to the agent
 }
 
 method=$TAW_SSH_KEY_METHOD
@@ -195,24 +195,24 @@ fi
 
 if [[ $method == agent ]]; then
     if ! agent_usable; then
-        taw_die "SSH_KEY_METHOD=agent, aber kein erreichbarer ssh-agent (SSH_AUTH_SOCK)." 255
+        taw_die "SSH_KEY_METHOD=agent, but no reachable ssh-agent (SSH_AUTH_SOCK)." 255
     fi
     if printf '%s' "$_key" | ssh-add -q -t "$TAW_SSH_AGENT_KEY_LIFETIME" - 2>/dev/null; then
         _key=""
-        taw_debug "Schlüssel für ${TAW_SSH_AGENT_KEY_LIFETIME}s in ssh-agent geladen"
+        taw_debug "Key loaded into ssh-agent for ${TAW_SSH_AGENT_KEY_LIFETIME}s"
         passthrough "$@"
     fi
     _key=""
-    taw_die "ssh-add konnte den Schlüssel aus Bitwarden nicht laden (verschlüsselt oder ungültiges Format?)." 255
+    taw_die "ssh-add could not load the key from Bitwarden (encrypted or invalid format?)." 255
 fi
 
-# tempfile: Schlüssel in eine private Datei, nach Ende von ssh sicher löschen
+# tempfile: key in a private file, securely deleted after ssh exits
 taw_ensure_dir "$TAW_RUNTIME_DIR" 700
 keyfile=$(umask 077; mktemp "$TAW_RUNTIME_DIR/sshkey.XXXXXX")
-# shellcheck disable=SC2329  # wird über trap aufgerufen
+# shellcheck disable=SC2329  # called via trap
 cleanup() {
     if [[ -n ${keyfile:-} && -f $keyfile ]]; then
-        # überschreiben, dann löschen
+        # overwrite, then delete
         local size
         size=$(wc -c <"$keyfile" 2>/dev/null || echo 4096)
         head -c "$size" /dev/zero >"$keyfile" 2>/dev/null || true
@@ -222,8 +222,8 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 129' HUP
 trap 'exit 143' TERM
-# INT/QUIT nicht abbrechen lassen (ssh behandelt Strg+C selbst); ':' statt ''
-# damit ssh die Signale NICHT als ignoriert erbt.
+# Don't let INT/QUIT abort us (ssh handles Ctrl+C itself); ':' instead of ''
+# so that ssh does NOT inherit the signals as ignored.
 trap ':' INT QUIT
 
 printf '%s' "$_key" >"$keyfile"

@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Abhängigkeiten
+      - name: Dependencies
         run: sudo apt-get update && sudo apt-get install -y jq shellcheck
-      - name: Testsuite
+      - name: Test suite
         run: tests/run_tests.sh -v

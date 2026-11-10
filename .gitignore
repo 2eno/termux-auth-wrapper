@@ -1,4 +1,4 @@
-# Lokale Konfiguration / Geheimnisse nie einchecken
+# Never commit local configuration / secrets
 config/config.conf
 config/ssh-hosts.conf
 *.taw-new.*
