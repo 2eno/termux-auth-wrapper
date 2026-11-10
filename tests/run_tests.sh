@@ -44,7 +44,8 @@ new_env() {
     mkdir -p "$PREFIX/bin" "$PREFIX/tmp" "$PREFIX/etc/apt/apt.conf.d" "$HOME" "$base/system"
     : >"$MOCK_LOG"; : >"$FP_CALLS"
     export PATH="$PREFIX/bin:/usr/bin:/bin"
-    unset BW_SESSION SSH_AUTH_SOCK
+    # CI runners set XDG_*, which would bypass the fake $HOME
+    unset BW_SESSION SSH_AUTH_SOCK XDG_CONFIG_HOME XDG_STATE_HOME
     for v in $(compgen -v TAW_); do unset "$v"; done
     export TAW_COLOR=never
     export TAW_ALLOW_ROOT=1   # test containers often run as root
