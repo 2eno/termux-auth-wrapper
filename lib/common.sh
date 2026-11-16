@@ -107,6 +107,7 @@ declare -gA _TAW_DEFAULTS=(
     [BIO_TIMEOUT]="30"
     [BIO_MAX_ATTEMPTS]="2"
     [BIO_DIALOG_TEXT]="true"
+    [BIO_CRASH_CHECK]="true"
     # Auth cache (grace period like sudo)
     [AUTH_CACHE_TIMEOUT]="300"
     [AUTH_CACHE_SCOPE]="session"
@@ -338,4 +339,46 @@ taw_audit() {
         chmod 600 "$log"
     } 2>/dev/null || true
     return 0
+}
+
+# --- Root / Termux:API crash helpers -------------------------------------------
+# Prints the path of a usable su binary (SU_BINARY or the KernelSU defaults).
+taw_find_su() {
+    local c
+    if [[ -n ${TAW_SU_BINARY:-} && ${TAW_SU_BINARY:-auto} != auto ]]; then
+        [[ -x $TAW_SU_BINARY ]] && { printf '%s' "$TAW_SU_BINARY"; return 0; }
+        return 1
+    fi
+    for c in /system/bin/su /data/adb/ksu/bin/su /system/xbin/su /sbin/su \
+             /debug_ramdisk/su /su/bin/su; do
+        [[ -x $c ]] && { printf '%s' "$c"; return 0; }
+    done
+    return 1
+}
+
+# Reads logcat output on stdin and prints the last "FATAL EXCEPTION" block
+# of com.termux.api (at most 40 lines, without the logcat prefix).
+taw_extract_crash() {
+    awk '
+        /FATAL EXCEPTION/ { if (blk != "" && api) last = blk; blk = ""; api = 0; inblk = 1; n = 0 }
+        inblk && /AndroidRuntime/ {
+            if (n < 40) { line = $0; sub(/^.*AndroidRuntime[^:]*: /, "", line); blk = blk line "\n"; n++ }
+            if ($0 ~ /Process: com\.termux\.api/) api = 1
+            next
+        }
+        inblk { if (blk != "" && api) last = blk; inblk = 0 }
+        END { if (inblk && blk != "" && api) last = blk; printf "%s", last }'
+}
+
+# One-line summary of a crash block: the innermost "Caused by:" line,
+# otherwise the exception line.
+taw_crash_summary() {
+    local line cause="" exc=""
+    while IFS= read -r line; do
+        case $line in
+            "Caused by: "*) cause=${line#Caused by: } ;;
+            *Exception*|*Error*) [[ -z $exc && $line != "FATAL EXCEPTION"* ]] && exc=$line ;;
+        esac
+    done <<<"$1"
+    printf '%s' "${cause:-$exc}"
 }

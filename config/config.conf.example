@@ -20,6 +20,9 @@ BIO_MAX_ATTEMPTS=2
 # Pass title/description (-t/-d) to termux-fingerprint.
 # Set to false if the installed termux-api version can't handle it.
 BIO_DIALOG_TEXT=true
+# On a dialog timeout, read the crash log via root and report if the
+# Termux:API app crashed (read only; only on that error path).
+BIO_CRASH_CHECK=true
 
 # --- Auth cache (grace period, like sudo's "timestamp_timeout") --------------
 # Seconds a successful authentication stays valid.

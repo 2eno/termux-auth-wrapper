@@ -29,6 +29,31 @@ _taw_bio_set() {
     TAW_BIO_REASON=$2
 }
 
+# After a timeout: did Termux:API crash during this attempt? Reads the crash
+# buffer via root (read only, only on this error path). Returns 0 and sets
+# TAW_BIO_STATUS/REASON if a crash was found.
+_taw_bio_crash_check() {
+    local since=$1 su log crash cause hint=""
+    taw_is_true "${TAW_BIO_CRASH_CHECK:-true}" || return 1
+    command -v timeout >/dev/null 2>&1 || return 1
+    su=$(taw_find_su) || return 1
+    log=$(timeout 10 "$su" -c "logcat -d -b crash -T '$since'" </dev/null 2>/dev/null) || true
+    crash=$(taw_extract_crash <<<"$log")
+    [[ -n $crash ]] || return 1
+    cause=$(taw_crash_summary "$crash")
+    case $crash in
+        *"not installed on user"*|*"Unable to get package info for com.termux.api"*)
+            hint=" Android hides the package from the app itself – usually a root-hiding module (Hide My Applist, Shamiko, KernelSU 'umount modules'): exclude com.termux and com.termux.api there" ;;
+        *SecurityException*|*"Permission Denial"*)
+            hint=" Install Termux and Termux:API from the same source and allow all Termux:API permissions" ;;
+        *ForegroundServiceStartNotAllowed*|*BackgroundServiceStartNotAllowed*|*"not allowed to start service"*)
+            hint=" Set Termux:API to 'Unrestricted' under battery settings" ;;
+    esac
+    _taw_bio_set unavailable "The Termux:API app crashed while opening the dialog. Cause: ${cause:-unknown exception}${hint:+ ->$hint} (details: termux-auth diag)"
+    taw_debug "Termux:API crash block: ${crash//$'\n'/ | }"
+    return 0
+}
+
 # A single dialog call. Sets TAW_BIO_STATUS/REASON.
 _taw_bio_attempt() {
     local fp=$1 desc=$2 out errfile rc=0
@@ -48,6 +73,9 @@ _taw_bio_attempt() {
 
     taw_ensure_dir "$TAW_RUNTIME_DIR" 700
     errfile=$(mktemp "$TAW_RUNTIME_DIR/fp-err.XXXXXX")
+    # Start time for the crash check (logcat -T uses local time)
+    local since
+    since=$(date '+%m-%d %H:%M:%S.000')
     # stdin from /dev/null: the check must never "steal" data from a pipe
     # (e.g. with: echo foo | sudo tee /file)
     out=$("${cmd[@]}" </dev/null 2>"$errfile") || rc=$?
@@ -56,6 +84,9 @@ _taw_bio_attempt() {
     rm -f "$errfile"
     taw_debug "termux-fingerprint rc=$rc out=${out//$'\n'/ } err=${errtext//$'\n'/ }"
 
+    if (( rc == 124 )) && _taw_bio_crash_check "$since"; then
+        return 1
+    fi
     if (( rc == 124 )); then
         _taw_bio_set unavailable "No answer from Termux:API within ${TAW_BIO_TIMEOUT}s. Either the dialog was not confirmed, or the 'Termux:API' app is not responding or has crashed (source/signature, battery restriction, never opened). Narrow down the cause with: termux-auth diag"
         return 1

@@ -227,7 +227,7 @@ cmd_diag() {
     if [[ -n $su ]]; then
         local crash
         _diag_run 20 "$su" -c 'logcat -d -b crash 2>/dev/null; logcat -d -s AndroidRuntime:E 2>/dev/null'
-        crash=$(_extract_crash <<<"$DIAG_OUT")
+        crash=$(taw_extract_crash <<<"$DIAG_OUT")
         if [[ -n $crash ]]; then
             _mark fail; printf 'Termux:API has crashed. Last crash:\n'
             printf '%s\n' "$crash" | sed 's/^/   /'
@@ -238,19 +238,6 @@ cmd_diag() {
     else
         _mark warn; printf 'no su – skipped. Manually: logcat -d -b crash (needs root/adb)\n'
     fi
-}
-
-# Extract the last "FATAL EXCEPTION" block of com.termux.api from logcat
-_extract_crash() {
-    awk '
-        /FATAL EXCEPTION/ { if (blk != "" && api) last = blk; blk = ""; api = 0; inblk = 1; n = 0 }
-        inblk && /AndroidRuntime/ {
-            if (n < 40) { line = $0; sub(/^.*AndroidRuntime[^:]*: /, "", line); blk = blk line "\n"; n++ }
-            if ($0 ~ /Process: com\.termux\.api/) api = 1
-            next
-        }
-        inblk { if (blk != "" && api) last = blk; inblk = 0 }
-        END { if (inblk && blk != "" && api) last = blk; printf "%s", last }'
 }
 
 # Hints for known crash causes

@@ -246,6 +246,28 @@ MOCK_FP=hang run check_biometric
 assert_eq "hanging dialog -> exit 1" 1 "$RC"
 assert_contains "hanging dialog -> timeout message" "No answer from Termux:API" "$OUT"
 (( SECONDS - start <= 10 )) && ok "timeout applies (≤10s)" || bad "timeout applies" "$((SECONDS - start))s"
+# Timeout because Termux:API crashed (real case: hidden by Hide My Applist)
+cat >"$PREFIX/bin/logcat" <<'EOF'
+#!/bin/sh
+echo "$*" >>"$MOCK_LOG"
+[ "$3" = crash ] || exit 0
+cat <<'LOG'
+11-16 10:00:00.000 16245 16245 E AndroidRuntime: FATAL EXCEPTION: main
+11-16 10:00:00.000 16245 16245 E AndroidRuntime: Process: com.termux.api, PID: 16245
+11-16 10:00:00.000 16245 16245 E AndroidRuntime: java.lang.RuntimeException: Unable to instantiate application com.termux.api.TermuxAPIApplication package com.termux.api
+11-16 10:00:00.000 16245 16245 E AndroidRuntime: Caused by: java.lang.IllegalStateException: Unable to get package info for com.termux.api; is package not installed on user 0?
+LOG
+EOF
+chmod +x "$PREFIX/bin/logcat"
+: >"$MOCK_LOG"
+MOCK_FP=hang run check_biometric
+assert_contains "timeout + crash -> crash reported" "Termux:API app crashed while opening the dialog" "$OUT"
+assert_contains "timeout + crash -> cause line" "is package not installed on user 0?" "$OUT"
+assert_contains "timeout + crash -> root-hiding hint" "Hide My Applist" "$OUT"
+assert_contains "crash check only reads logs since the attempt" "-T " "$(cat "$MOCK_LOG")"
+MOCK_FP=hang TAW_BIO_CRASH_CHECK=false run check_biometric
+assert_contains "BIO_CRASH_CHECK=false -> plain timeout message" "No answer from Termux:API" "$OUT"
+rm -f "$PREFIX/bin/logcat"
 : >"$FP_CALLS"
 MOCK_FP=fail TAW_BIO_MAX_ATTEMPTS=3 run check_biometric
 assert_eq "BIO_MAX_ATTEMPTS=3 -> 3 dialogs" 3 "$(fp_count)"

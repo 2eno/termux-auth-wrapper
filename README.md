@@ -268,6 +268,8 @@ TAW_AUTH_CACHE_TIMEOUT=0 ssh server     # guaranteed fingerprint this time
 | `BIO_TITLE` | `Termux authentication` | title of the dialog |
 | `BIO_TIMEOUT` | `30` | seconds until the dialog is aborted (also protects against hangs when Termux:API is missing) |
 | `BIO_MAX_ATTEMPTS` | `2` | retries after “not recognized/cancelled” |
+| `BIO_DIALOG_TEXT` | `true` | pass title/description (`-t/-d`) to `termux-fingerprint` |
+| `BIO_CRASH_CHECK` | `true` | on a dialog timeout, read the crash log via root and name the cause if Termux:API crashed |
 | `AUTH_CACHE_TIMEOUT` | `300` | grace period in seconds; `0` = always ask |
 | `AUTH_CACHE_SCOPE` | `session` | `session` = per terminal session (scripts inherit it), `global` = everywhere |
 | `AUTH_CACHE_SHARED` | `false` | shared cache for sudo **and** ssh |
